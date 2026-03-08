@@ -1,3 +1,1 @@
-# CS651-Project-1-Part-3
-
-Spring 2026 Group 2 Project 1 Part 3
+CS651 Spring 2026 Group 2's repository for the project website

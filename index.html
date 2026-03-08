@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Home - The Company</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+      <a class="navbar-brand" href="index.html">The Company</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="menu">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="about.html">About</a></li>
+          <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
+          <li class="nav-item"><a class="nav-link" href="signin.html">Sign In</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero-section text-center text-white d-flex align-items-center">
+    <div class="container">
+      <h1 class="display-4 fw-bold">See Your Home. Without Cameras.</h1>
+      <p class="lead">AI-powered spatial security that maps and tracks movement using WiFi signals.</p>
+      <div class="mt-4">
+        <a href="#" class="btn btn-primary btn-lg me-3">Get Early Access</a>
+        <a href="#demo" class="btn btn-outline-light btn-lg">Interactive Demo</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="product-visual text-center text-white d-flex align-items-center">
+    <div class="container">
+      <h2>A single device that turns WiFi signals into real-time spatial awareness.</h2>
+    </div>
+  </section>
+
+  <section class="container text-center py-5">
+    <h2 class="mb-5">Map. Detect. Understand.</h2>
+    <div class="row">
+      <div class="col-md-4">
+        <div class="info-box">Maps your home layout.</div>
+      </div>
+      <div class="col-md-4">
+        <div class="info-box">Detects presence and movement.</div>
+      </div>
+      <div class="col-md-4">
+        <div class="info-box">Learns normal behavior patterns.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="demo" class="demo-section text-center text-white d-flex align-items-center" style="height: auto; min-height: 80vh; padding: 60px 0;">
+    <div class="container">
+      <h2>See What the System Sees.</h2>
+      <p class="lead">No video. No audio. Just intelligent environmental awareness.</p>
+
+      <p class="hud-hint">↓ Click a room to explore the signal map</p>
+
+      <!-- Hotspot image -->
+      <div class="hotspot-row d-flex align-items-stretch justify-content-center gap-4 mt-4">
+        <div class="hotspot-wrapper" id="hotspot-map">
+
+          <!-- House exterior image -->
+          <img
+            class="house-img"
+            src="images/house.jpg"
+            alt="House floor plan"
+          />
+
+          <!-- Hotspots are injected by JS from HOTSPOT_CONFIG below -->
+
+          <!-- Detail panel (hidden until a hotspot is clicked) -->
+          <div class="room-detail" id="room-detail">
+            <button class="detail-close" id="detail-close" aria-label="Close">&#x2715;</button>
+            <img id="detail-img" src="" alt="" />
+            <div class="room-detail-body">
+              <div class="room-tag" id="detail-tag"></div>
+              <h4 id="detail-title"></h4>
+              <p id="detail-desc"></p>
+              <div class="signal-badges" id="detail-badges"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="final-cta text-center text-white d-flex align-items-center">
+    <div class="container">
+      <h2 class="mb-4">Smarter Protection Starts Here.</h2>
+      <a href="#" class="btn btn-primary btn-lg">Join the Waitlist</a>
+    </div>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    const HOTSPOT_CONFIG = [
+      {
+        id: "garage",
+        label: "Garage",
+        tag: "Zone 01 — Entry Point",
+        title: "Garage",
+        desc: "SpatialSense detects vehicle entry, motion near the door, and unusual dwell-time patterns. Alerts fire when movement occurs outside your normal schedule.",
+        badges: ["Motion Active", "Entry Zone", "Alert Ready"],
+        photo: "images/garage.jpg",
+        pos: { x: 29, y: 65 }   // percent from left / top of image
+      },
+      {
+        id: "living-room",
+        label: "Living Room",
+        tag: "Zone 02 — Common Area",
+        title: "Living Room",
+        desc: "The busiest zone in your home. The system builds a baseline of typical activity and flags irregular occupancy — whether too much or unexpectedly none.",
+        badges: ["Baseline Learned", "High Traffic", "Occupancy OK"],
+        photo: "images/living.jpg",
+        pos: { x: 57, y: 60 }
+      },
+      {
+        id: "bedroom-1",
+        label: "Bedroom 1",
+        tag: "Zone 03 — Primary Rest",
+        title: "Bedroom 1",
+        desc: "Sleep pattern recognition keeps your nights private yet protected. The system detects irregular nighttime movement without ever recording audio or video.",
+        badges: ["Sleep Mode", "Silent Zone", "Pattern Normal"],
+        photo: "images/bedroom1.jpg",
+        pos: { x: 76, y: 58 }
+      },
+      {
+        id: "bedroom-2",
+        label: "Bedroom 2",
+        tag: "Zone 04 — Secondary Rest",
+        title: "Bedroom 2",
+        desc: "Whether it's a guest room, home office, or child's bedroom — SpatialSense monitors for presence and movement, learning what's normal so it knows when something isn't.",
+        badges: ["Low Activity", "Guest Mode", "Monitoring On"],
+        photo: "images/bedroom2.jpg",
+        pos: { x: 58, y: 45 }
+      }
+    ];
+
+    (function () {
+      const map       = document.getElementById('hotspot-map');
+      const panel     = document.getElementById('room-detail');
+      const closeBtn  = document.getElementById('detail-close');
+      const detailImg = document.getElementById('detail-img');
+      const detailTag = document.getElementById('detail-tag');
+      const detailTitle = document.getElementById('detail-title');
+      const detailDesc  = document.getElementById('detail-desc');
+      const detailBadges = document.getElementById('detail-badges');
+
+      let activeId = null;
+
+      // Build hotspot dots from config
+      HOTSPOT_CONFIG.forEach(room => {
+        const dot = document.createElement('div');
+        dot.className = 'hotspot';
+        dot.dataset.id = room.id;
+        dot.style.left = room.pos.x + '%';
+        dot.style.top  = room.pos.y + '%';
+        dot.innerHTML = `
+          <div class="hotspot-ring"></div>
+          <div class="hotspot-dot"></div>
+          <span class="hotspot-label">${room.label}</span>
+        `;
+        dot.addEventListener('click', () => openRoom(room.id));
+        map.appendChild(dot);
+      });
+
+      function openRoom(id) {
+        const room = HOTSPOT_CONFIG.find(r => r.id === id);
+        if (!room) return;
+
+        // Toggle off if same room clicked twice
+        if (activeId === id) {
+          closeDetail();
+          return;
+        }
+
+        activeId = id;
+
+        // Update active dot style
+        document.querySelectorAll('.hotspot').forEach(el => {
+          el.classList.toggle('active', el.dataset.id === id);
+        });
+
+        // Populate panel
+        detailImg.src = room.photo;
+        detailImg.alt = room.title;
+        detailTag.textContent = room.tag;
+        detailTitle.textContent = room.title;
+        detailDesc.textContent = room.desc;
+        detailBadges.innerHTML = room.badges
+          .map(b => `<span class="signal-badge">${b}</span>`)
+          .join('');
+
+        // Show panel (re-trigger animation)
+        panel.classList.remove('visible');
+        void panel.offsetWidth; // force reflow for animation replay
+        panel.classList.add('visible');
+
+        // Panel is always present in layout — no scroll needed
+      }
+
+      function closeDetail() {
+        activeId = null;
+        panel.classList.remove('visible');
+        document.querySelectorAll('.hotspot').forEach(el => el.classList.remove('active'));
+      }
+
+      closeBtn.addEventListener('click', closeDetail);
+    })();
+  </script>
+
+</body>
+</html>
