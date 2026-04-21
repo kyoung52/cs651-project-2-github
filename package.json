@@ -1,0 +1,14 @@
+{
+  "name": "roomify",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Roomify — CS651 ERN + Firebase + Gemini",
+  "scripts": {
+    "install:all": "npm install --prefix client && npm install --prefix server",
+    "build": "npm run build --prefix client",
+    "build:dev": "npm run build:dev --prefix client",
+    "start": "npm start --prefix server",
+    "dev:client": "npm run watch --prefix client",
+    "dev:server": "npm run dev --prefix server"
+  }
+}

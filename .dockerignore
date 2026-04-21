@@ -1,0 +1,38 @@
+# --- VCS / CI ---
+.git
+.gitignore
+.github
+
+# --- Local node artifacts ---
+node_modules
+client/node_modules
+server/node_modules
+client/dist
+
+# --- Build output (regenerated inside the image) ---
+server/public
+
+# --- Env files (secrets) ---
+# Server secrets come via Cloud Run --set-env-vars / --set-secrets.
+.env
+.env.*
+# Except the client-side build env baked into the SPA bundle.
+!client/.env.production
+!client/.env.example
+
+# --- Editor / OS ---
+.DS_Store
+.idea
+.vscode
+
+# --- Docs & misc ---
+*.md
+!README.md
+DockerContainer
+Dockerfile
+.dockerignore
+
+# --- Secrets / keys ---
+*.pem
+*.key
+serviceAccountKey.json
