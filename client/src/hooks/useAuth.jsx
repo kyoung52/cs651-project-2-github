@@ -88,6 +88,26 @@ export function AuthProvider({ children }) {
     return result;
   };
 
+  /**
+   * Request Google Photos / YouTube scopes and store the access token server-side.
+   * Uses a popup re-consent flow for the currently signed-in user.
+   */
+  const connectGoogleMedia = async () => {
+    setError(null);
+    const auth = getFirebaseAuth();
+    const provider = getGoogleProvider({ withMediaScopes: true });
+    const result = await signInWithPopup(auth, provider);
+    const cred = GoogleAuthProvider.credentialFromResult(result);
+    const accessToken = cred?.accessToken || result?._tokenResponse?.oauthAccessToken || null;
+    if (accessToken) {
+      const token = await result.user.getIdToken();
+      setAuthToken(token);
+      const { data } = await api.post('/api/auth/google-token', { accessToken });
+      return Boolean(data?.hasPhotosScope);
+    }
+    return false;
+  };
+
   const logout = async () => {
     setError(null);
     const auth = getFirebaseAuth();
@@ -104,6 +124,7 @@ export function AuthProvider({ children }) {
       signInEmail,
       signUpEmail,
       signInGoogle,
+      connectGoogleMedia,
       logout,
       refreshToken,
       firebaseReady: isFirebaseConfigured(),

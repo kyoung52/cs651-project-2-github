@@ -27,11 +27,12 @@ export default function SettingsPage() {
   const {
     status,
     isGeminiConfigured,
+    isVertexFlashImageConfigured,
     isPinterestConfigured,
     isGoogleSearchConfigured,
     loading: configLoading,
   } = useConfig();
-  const { user } = useAuth();
+  const { user, connectGoogleMedia } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [pinterestConnected, setPinterestConnected] = useState(false);
@@ -122,13 +123,60 @@ export default function SettingsPage() {
         <section className="settings-section">
           <div className="settings-row">
             <div>
+              <h2>Vertex room preview</h2>
+              <p className="muted small">
+                Gemini 2.5 Flash Image draws the hero render when your GCP project and region are set
+                (same as Vertex text). Set VERTEX_IMAGE_GENERATION=false on the server to disable.
+              </p>
+            </div>
+            <ServiceStatusBadge
+              configured={isVertexFlashImageConfigured}
+              connected={isVertexFlashImageConfigured}
+            />
+          </div>
+          {!isVertexFlashImageConfigured && !configLoading ? (
+            <p className="hint small">{status.vertexFlashImage?.reason}</p>
+          ) : null}
+        </section>
+
+        <section className="settings-section">
+          <div className="settings-row">
+            <div>
               <h2>Google (Photos &amp; YouTube)</h2>
               <p className="muted small">
-                Sign in with Google on the sign-in page to authorize Photos and YouTube scopes.
+                Connect Google to authorize Photos and YouTube scopes.
               </p>
             </div>
             <ServiceStatusBadge configured connected={googleConnected} />
           </div>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const ok = await connectGoogleMedia();
+                if (ok) {
+                  setGoogleConnected(true);
+                  toast.push({ variant: 'success', title: 'Google Photos connected.' });
+                } else {
+                  toast.push({
+                    variant: 'warn',
+                    title: 'Google',
+                    message:
+                      'Connected, but Google Photos permission is still missing. Try reconnecting and ensure you grant Photos access.',
+                  });
+                }
+              } catch (err) {
+                toast.push({ variant: 'error', title: 'Google', message: err.message });
+              } finally {
+                setBusy(false);
+              }
+            }}
+            disabled={busy}
+          >
+            {busy ? 'Connecting…' : googleConnected ? 'Reconnect Google' : 'Connect Google'}
+          </button>
         </section>
 
         <section className="settings-section">

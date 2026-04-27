@@ -37,8 +37,8 @@ Express hosts the built SPA on `/` and the JSON API under `/api/*`.
 
 - Node.js 20+
 - A Firebase project (Auth + Firestore) — free tier is fine
-- Optional: Google AI Studio key (`GEMINI_API_KEY`), Pinterest app, Google
-  Custom Search engine.
+- Google Cloud project with Vertex AI enabled (Gemini runs via Cloud Run service account / ADC)
+- Optional: Pinterest app, Google Custom Search engine.
 
 ## Local development
 
@@ -81,8 +81,8 @@ gcloud run deploy roomify \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=YOUR_FB_PROJECT,FIREBASE_CLIENT_EMAIL=service-account@YOUR_FB_PROJECT.iam.gserviceaccount.com,PUBLIC_APP_URL=https://YOUR-SERVICE.run.app,ALLOWED_ORIGINS=" \
-  --set-secrets "FIREBASE_PRIVATE_KEY=firebase-private-key:latest,GEMINI_API_KEY=gemini-api-key:latest"
+  --set-env-vars "NODE_ENV=production,FIREBASE_PROJECT_ID=YOUR_FB_PROJECT,FIREBASE_CLIENT_EMAIL=service-account@YOUR_FB_PROJECT.iam.gserviceaccount.com,VERTEX_PROJECT_ID=YOUR_GCP_PROJECT,VERTEX_LOCATION=us-central1,PUBLIC_APP_URL=https://YOUR-SERVICE.run.app,ALLOWED_ORIGINS=" \
+  --set-secrets "FIREBASE_PRIVATE_KEY=firebase-private-key:latest"
 ```
 
 Cloud Run builds the multi-stage `Dockerfile`, listens on `$PORT`, and
@@ -106,12 +106,11 @@ Docker build. If you prefer to pass them on the deploy command, add
 ```bash
 # Upload secrets
 printf '%s' "$FIREBASE_PRIVATE_KEY" | gcloud secrets create firebase-private-key --data-file=-
-printf '%s' "$GEMINI_API_KEY"       | gcloud secrets create gemini-api-key       --data-file=-
 
 # Grant the Cloud Run runtime service account access to read them
 PROJECT_NUMBER=$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')
 SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-for s in firebase-private-key gemini-api-key; do
+for s in firebase-private-key; do
   gcloud secrets add-iam-policy-binding "$s" \
     --member="serviceAccount:${SA}" --role=roles/secretmanager.secretAccessor
 done
@@ -128,8 +127,9 @@ Server-side (root `.env`):
 
 - **Firebase Admin** — `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
   `FIREBASE_PRIVATE_KEY` (or `GOOGLE_APPLICATION_CREDENTIALS`).
-- **Gemini** — `GEMINI_API_KEY` (+ optional `GEMINI_MODEL_*`).
+- **Vertex AI Gemini** — `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` (+ optional `VERTEX_MODEL_*`).
 - **Pinterest** — `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET`.
+- **Pinterest (dev-only)** — `PINTEREST_DEV_ACCESS_TOKEN` (read-only testing without an app secret).
 - **Google Custom Search** — `GOOGLE_SEARCH_API_KEY`, `GOOGLE_SEARCH_ENGINE_ID`.
 - **Server** — `PORT`, `NODE_ENV`, `ALLOWED_ORIGINS`, `PUBLIC_APP_URL`,
   `DEV_SKIP_AUTH`.
@@ -155,15 +155,22 @@ other env vars can sneak into the browser bundle.
 | GET | `/api/auth/pinterest/callback` | OAuth callback |
 | POST | `/api/media/process` | Multipart upload → analyze + generate concept |
 | POST | `/api/media/process-url` | Analyze a remote https image |
+| POST | `/api/media/refine` | Refine concept + rerender hero image |
 | GET | `/api/social/google-photos/albums` | Google Photos albums |
 | GET | `/api/social/google-photos/albums/:albumId/media` | Album media |
+| POST | `/api/media/process-google-photos` | Generate from selected Google Photos items |
 | GET | `/api/social/pinterest/boards` | Pinterest boards |
 | GET | `/api/social/pinterest/boards/:boardId/pins` | Board pins |
 | GET | `/api/social/youtube/videos` | Your YouTube videos |
 | GET | `/api/search?q=` | Proxied Google Image Search |
-| POST | `/api/gemini/refine` | Refine a generated concept |
+| POST | `/api/gemini/refine` | (Deprecated) text-only refinement (use `/api/media/refine`) |
 | POST | `/api/gemini/save-project` | Persist concept to Firestore |
 | GET | `/api/gemini/projects` | List saved projects |
+| GET | `/api/gemini/projects/:id` | Fetch one project |
+| DELETE | `/api/gemini/projects/:id` | Delete one project |
+| POST | `/api/gemini/projects/:id/publish` | Publish / unpublish project |
+| GET | `/api/explore/feed` | List published projects |
+| POST | `/api/explore/render` | Render preview for a published project |
 | POST | `/api/gemini/log-generation` | Optional analytics log |
 
 All `/api/*` failures return `{ "error": string, "code": string }`.

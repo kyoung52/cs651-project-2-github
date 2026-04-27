@@ -36,10 +36,34 @@ router.post(
   ...validateGoogleToken,
   runValidators,
   asyncHandler(async (req, res) => {
+    const accessToken = req.body.accessToken;
+    let scopes = [];
+    try {
+      const infoRes = await fetch(
+        `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(
+          accessToken
+        )}`
+      );
+      if (infoRes.ok) {
+        const info = await infoRes.json();
+        scopes = String(info?.scope || '')
+          .split(/\s+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Best-effort only; token can still be stored and used.
+    }
+
     await updateUserSocialTokens(req.user.uid, {
-      googleAccessToken: req.body.accessToken,
+      googleAccessToken: accessToken,
+      googleAccessTokenScopes: scopes,
     });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      scopes,
+      hasPhotosScope: scopes.includes('https://www.googleapis.com/auth/photoslibrary.readonly'),
+    });
   })
 );
 

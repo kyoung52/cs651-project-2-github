@@ -19,6 +19,7 @@ import mediaRoutes from './routes/media.js';
 import geminiRoutes from './routes/gemini.js';
 import searchRoutes from './routes/search.js';
 import configRoutes from './routes/config.js';
+import exploreRoutes from './routes/explore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,7 +117,8 @@ export function createApp({ isProd = process.env.NODE_ENV === 'production' } = {
     baseUri: ["'self'"],
     frameAncestors: ["'self'"],
     objectSrc: ["'none'"],
-    imgSrc: ["'self'", 'data:', 'blob:'],
+    // Room concepts load remote preview URLs (Custom Search, stock fallbacks, NanoBanana).
+    imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
     fontSrc: ["'self'", 'data:'],
     styleSrc: ["'self'", "'unsafe-inline'"],
     scriptSrc: [
@@ -184,8 +186,9 @@ export function createApp({ isProd = process.env.NODE_ENV === 'production' } = {
     );
   });
 
-  app.use(express.json({ limit: '512kb' }));
-  app.use(express.urlencoded({ extended: true, limit: '512kb' }));
+  // Large saves include concept JSON + optional data: image URIs; keep under typical proxy limits.
+  app.use(express.json({ limit: '12mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   app.use('/api', apiLimiter);
 
@@ -199,6 +202,7 @@ export function createApp({ isProd = process.env.NODE_ENV === 'production' } = {
   app.use('/api/media', mediaRoutes);
   app.use('/api/gemini', geminiRoutes);
   app.use('/api/search', searchRoutes);
+  app.use('/api/explore', exploreRoutes);
 
   app.use(uploadErrorHandler);
 

@@ -6,6 +6,7 @@ import admin from 'firebase-admin';
 import { readFileSync } from 'fs';
 
 let initialized = false;
+let firestoreInstance = null;
 
 export function initFirebase() {
   if (initialized) return admin;
@@ -62,7 +63,13 @@ export function initFirebase() {
 
 export function getFirestore() {
   initFirebase();
-  return admin.firestore();
+  // Firestore settings() can only be called once and before any other use.
+  // Cache the Firestore instance so we configure it exactly once per process.
+  if (firestoreInstance) return firestoreInstance;
+  const db = admin.firestore();
+  db.settings({ ignoreUndefinedProperties: true });
+  firestoreInstance = db;
+  return firestoreInstance;
 }
 
 export { admin };

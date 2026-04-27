@@ -80,6 +80,7 @@ export async function fetchConfig() {
         gemini: { configured: false },
         pinterest: { configured: false },
         googleSearch: { configured: false },
+        vertexFlashImage: { configured: false },
       },
     };
   }

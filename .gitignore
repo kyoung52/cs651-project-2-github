@@ -14,10 +14,9 @@ server/public/
 client/.env
 client/.env.local
 client/.env.*.local
-# Production client env is safe (public Firebase keys only); keep committed if desired.
-!client/.env.production
-!client/.env.example
-!.env.example
+# Production client env is safe (public Firebase keys only); but per your request
+# we will NOT commit any .env.production/.env.example files. Deployment will use
+# `.gcloudignore` to still upload `client/.env.production` for Cloud Run builds.
 
 # --- Logs ---
 *.log
@@ -32,10 +31,6 @@ npm-debug.log*
 *.pem
 *.key
 serviceAccountKey.json
-
-# User request: do not commit env templates
-.env.example
-client/.env.production
 
 # User request: never commit env templates
 **/.env.example

@@ -14,12 +14,14 @@ const DEFAULT_STATUS = {
   gemini: { configured: false },
   pinterest: { configured: false },
   googleSearch: { configured: false },
+  vertexFlashImage: { configured: false },
 };
 
 const ConfigContext = createContext({
   status: DEFAULT_STATUS,
   loading: true,
   refresh: async () => {},
+  isVertexFlashImageConfigured: false,
 });
 
 export function ConfigProvider({ children }) {
@@ -45,6 +47,7 @@ export function ConfigProvider({ children }) {
       isGeminiConfigured: !!status.gemini?.configured,
       isPinterestConfigured: !!status.pinterest?.configured,
       isGoogleSearchConfigured: !!status.googleSearch?.configured,
+      isVertexFlashImageConfigured: !!status.vertexFlashImage?.configured,
       isFirebaseAdminConfigured: !!status.firebase?.configured,
     }),
     [status, loading]

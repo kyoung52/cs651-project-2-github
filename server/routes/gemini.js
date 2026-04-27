@@ -11,12 +11,16 @@ import {
   validateRefine,
   validateSaveProject,
   validateLogGeneration,
+  validateProjectId,
 } from '../middleware/validate.js';
 import { refineConcept } from '../services/geminiService.js';
 import {
   saveProject,
   saveGeneration,
   listProjects,
+  getProject,
+  deleteProject,
+  setProjectPublished,
 } from '../services/firestoreService.js';
 import {
   asyncHandler,
@@ -24,6 +28,7 @@ import {
   requireService,
 } from '../utils/httpError.js';
 import { isGeminiConfigured } from '../config/secrets.js';
+import { sanitizeProjectPayloadForStorage } from '../utils/projectPayload.js';
 
 const router = express.Router();
 
@@ -47,7 +52,8 @@ router.post(
   ...validateSaveProject,
   runValidators,
   asyncHandler(async (req, res) => {
-    const id = await saveProject(req.user.uid, req.body.name, req.body.payload || {});
+    const payload = sanitizeProjectPayloadForStorage(req.body.payload || {});
+    const id = await saveProject(req.user.uid, req.body.name, payload);
     if (!id) {
       return sendError(
         res,
@@ -66,6 +72,56 @@ router.get(
   asyncHandler(async (req, res) => {
     const projects = await listProjects(req.user.uid);
     res.json({ projects });
+  })
+);
+
+router.get(
+  '/projects/:id',
+  verifyFirebaseToken,
+  ...validateProjectId,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const project = await getProject(req.user.uid, req.params.id);
+    if (!project) {
+      return sendError(res, 404, 'NOT_FOUND', 'Project not found.');
+    }
+    res.json({ project });
+  })
+);
+
+router.delete(
+  '/projects/:id',
+  verifyFirebaseToken,
+  ...validateProjectId,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const ok = await deleteProject(req.user.uid, req.params.id);
+    if (!ok) {
+      return sendError(
+        res,
+        503,
+        'STORAGE_UNAVAILABLE',
+        'Project storage is not available right now.'
+      );
+    }
+    res.json({ ok: true });
+  })
+);
+
+router.post(
+  '/projects/:id/publish',
+  verifyFirebaseToken,
+  ...validateProjectId,
+  sanitizeBodyStrings,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const published =
+      req.body?.published === true || req.body?.published === 'true' || req.body?.published === 1;
+    const ok = await setProjectPublished(req.user.uid, req.params.id, published);
+    if (!ok) {
+      return sendError(res, 404, 'NOT_FOUND', 'Project not found.');
+    }
+    res.json({ ok: true, published });
   })
 );
 

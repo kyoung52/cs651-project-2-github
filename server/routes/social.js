@@ -41,6 +41,16 @@ async function resolveGoogleToken(req) {
   );
 }
 
+async function resolvePinterestToken(req) {
+  const user = await getUserDoc(req.user.uid);
+  const token = user?.pinterestAccessToken || process.env.PINTEREST_DEV_ACCESS_TOKEN || null;
+  return {
+    token,
+    connected: Boolean(user?.pinterestAccessToken),
+    dev: Boolean(!user?.pinterestAccessToken && process.env.PINTEREST_DEV_ACCESS_TOKEN),
+  };
+}
+
 /* --------------------------- Google Photos --------------------------- */
 
 router.get(
@@ -58,6 +68,14 @@ router.get(
       res.json({ configured: true, albums });
     } catch (err) {
       console.warn('[google-photos]', err.message);
+      if (String(err.message || '').includes('insufficient authentication scopes')) {
+        return sendError(
+          res,
+          403,
+          'GOOGLE_SCOPE_MISSING',
+          'Google Photos permission is missing. Go to Settings and reconnect Google Photos.'
+        );
+      }
       return sendError(
         res,
         502,
@@ -92,6 +110,14 @@ router.get(
       });
     } catch (err) {
       console.warn('[google-photos:media]', err.message);
+      if (String(err.message || '').includes('insufficient authentication scopes')) {
+        return sendError(
+          res,
+          403,
+          'GOOGLE_SCOPE_MISSING',
+          'Google Photos permission is missing. Go to Settings and reconnect Google Photos.'
+        );
+      }
       return sendError(
         res,
         502,
@@ -112,14 +138,13 @@ router.get(
     'Pinterest is not configured on this server.'
   ),
   asyncHandler(async (req, res) => {
-    const user = await getUserDoc(req.user.uid);
-    const token = user?.pinterestAccessToken;
+    const { token, connected, dev } = await resolvePinterestToken(req);
     if (!token) {
       return res.json({ configured: true, connected: false, boards: [] });
     }
     try {
       const boards = await pinterest.listBoards(token);
-      res.json({ configured: true, connected: true, boards });
+      res.json({ configured: true, connected, dev, boards });
     } catch (err) {
       console.warn('[pinterest:boards]', err.message);
       return sendError(res, 502, 'PINTEREST_FAILED', 'Unable to fetch Pinterest boards.');
@@ -137,14 +162,13 @@ router.get(
   ...validateBoardId,
   runValidators,
   asyncHandler(async (req, res) => {
-    const user = await getUserDoc(req.user.uid);
-    const token = user?.pinterestAccessToken;
+    const { token, connected, dev } = await resolvePinterestToken(req);
     if (!token) {
       return res.json({ configured: true, connected: false, pins: [] });
     }
     try {
       const pins = await pinterest.listPins(token, req.params.boardId);
-      res.json({ configured: true, connected: true, pins });
+      res.json({ configured: true, connected, dev, pins });
     } catch (err) {
       console.warn('[pinterest:pins]', err.message);
       return sendError(res, 502, 'PINTEREST_FAILED', 'Unable to fetch Pinterest pins.');

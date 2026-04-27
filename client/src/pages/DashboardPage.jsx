@@ -19,6 +19,7 @@ import Modal from '../components/ui/Modal.jsx';
 import EmptyState from '../components/ui/EmptyState.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import { useConfig } from '../hooks/useConfig.jsx';
+import { useWorkspace } from '../hooks/useWorkspace.jsx';
 import { api } from '../services/api.js';
 import { sanitizeChatInput } from '../utils/validators.js';
 
@@ -29,6 +30,7 @@ const WELCOME_MESSAGE = {
 
 export default function DashboardPage() {
   const { isGeminiConfigured, isGoogleSearchConfigured, loading: configLoading } = useConfig();
+  const { dashboardState, setDashboardState, resetDashboardState } = useWorkspace();
   const toast = useToast();
 
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
@@ -41,12 +43,86 @@ export default function DashboardPage() {
   const [searchWasConfigured, setSearchWasConfigured] = useState(null);
   const [analysisKeywords, setAnalysisKeywords] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
   const [tab, setTab] = useState('renders');
+  const [regen, setRegen] = useState(null);
 
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineText, setRefineText] = useState('');
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
+
+  // Restore workspace state when returning to the Dashboard route.
+  useEffect(() => {
+    if (!dashboardState) return;
+    setMessages(dashboardState.messages || [WELCOME_MESSAGE]);
+    setChatContext(dashboardState.chatContext || '');
+    setFiles(dashboardState.files || []);
+    setAudioNames(dashboardState.audioNames || []);
+    setRealistic(dashboardState.realistic ?? true);
+    setConcept(dashboardState.concept || null);
+    setSimilar(dashboardState.similar || []);
+    setSearchWasConfigured(dashboardState.searchWasConfigured ?? null);
+    setAnalysisKeywords(dashboardState.analysisKeywords || []);
+    setTab(dashboardState.tab || 'renders');
+    setRegen(dashboardState.regen || null);
+    setLoading(false);
+    setGenerationProgress(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist the workspace state when navigating away.
+  useEffect(() => {
+    return () => {
+      setDashboardState({
+        messages,
+        chatContext,
+        files,
+        audioNames,
+        realistic,
+        concept,
+        similar,
+        searchWasConfigured,
+        analysisKeywords,
+        tab,
+        regen,
+      });
+    };
+  }, [
+    setDashboardState,
+    messages,
+    chatContext,
+    files,
+    audioNames,
+    realistic,
+    concept,
+    similar,
+    searchWasConfigured,
+    analysisKeywords,
+    tab,
+    regen,
+  ]);
+
+  const resetWorkspace = () => {
+    resetDashboardState();
+    setMessages([WELCOME_MESSAGE]);
+    setChatContext('');
+    setFiles([]);
+    setAudioNames([]);
+    setRealistic(true);
+    setConcept(null);
+    setSimilar([]);
+    setSearchWasConfigured(null);
+    setAnalysisKeywords([]);
+    setTab('renders');
+    setRegen(null);
+    setLoading(false);
+    setGenerationProgress(0);
+    setRefineOpen(false);
+    setRefineText('');
+    setSaveOpen(false);
+    setSaveName('');
+  };
 
   const appendMessage = useCallback((role, text) => {
     setMessages((m) => [...m, { role, text }]);
@@ -58,12 +134,29 @@ export default function DashboardPage() {
         variant: 'warn',
         title: 'AI generation unavailable',
         message:
-          'GEMINI_API_KEY is not set on the server. You can still explore the UI, but concept generation is disabled.',
+          'AI is not configured on the server (Vertex project + location). You can still explore the UI, but concept generation is disabled.',
         duration: 7000,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configLoading, isGeminiConfigured]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const id = setInterval(() => {
+      setGenerationProgress((p) => {
+        if (p >= 92) return p;
+        return p + 1 + Math.random() * 2.2;
+      });
+    }, 360);
+    return () => clearInterval(id);
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading || generationProgress !== 100) return undefined;
+    const t = setTimeout(() => setGenerationProgress(0), 450);
+    return () => clearTimeout(t);
+  }, [loading, generationProgress]);
 
   const onSend = (text) => {
     const clean = sanitizeChatInput(text);
@@ -98,11 +191,12 @@ export default function DashboardPage() {
       toast.push({
         variant: 'warn',
         title: 'AI generation unavailable',
-        message: 'Set GEMINI_API_KEY on the server to enable concept generation.',
+        message: 'Configure Vertex AI (project + location) on the server to enable concept generation.',
       });
       return;
     }
 
+    setGenerationProgress(6);
     setLoading(true);
     try {
       const fd = new FormData();
@@ -112,12 +206,19 @@ export default function DashboardPage() {
 
       const { data } = await api.post('/api/media/process', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000,
+        onUploadProgress(ev) {
+          if (!ev.total) return;
+          const u = Math.round((ev.loaded / ev.total) * 34);
+          setGenerationProgress((p) => Math.max(p, Math.min(34, u)));
+        },
       });
 
       setConcept(data.concept);
       setSimilar(data.similarInspiration || []);
       setSearchWasConfigured(Boolean(data.searchConfigured));
       setAnalysisKeywords(data.concept?.analysisKeywords || []);
+      setRegen(data.regen || null);
       appendMessage(
         'bot',
         `Suggested style: ${data.concept?.styleLabel || 'Your mix'}. ${data.concept?.conceptDescription || ''}`
@@ -127,7 +228,9 @@ export default function DashboardPage() {
         title: 'Concept ready',
         message: data.concept?.title || 'Your room concept was generated.',
       });
+      setGenerationProgress(100);
     } catch (err) {
+      setGenerationProgress(0);
       toast.push({ variant: 'error', title: 'Generation failed', message: err.message });
     } finally {
       setLoading(false);
@@ -138,17 +241,33 @@ export default function DashboardPage() {
     const clean = sanitizeChatInput(refineText);
     if (!clean) return;
     setRefineOpen(false);
+    setGenerationProgress(10);
     setLoading(true);
     try {
-      const { data } = await api.post('/api/gemini/refine', {
-        previousConcept: concept,
-        feedback: clean,
+      const fd = new FormData();
+      // Allow refining with any current uploads (and any newly added files).
+      files.forEach((f) => fd.append('files', f));
+      fd.append('previousConcept', JSON.stringify(concept || {}));
+      fd.append('feedback', clean);
+      fd.append('chatContext', chatContext);
+      if (regen) fd.append('regen', JSON.stringify(regen));
+
+      const { data } = await api.post('/api/media/refine', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000,
       });
-      setConcept((prev) => ({ ...prev, ...data.concept }));
+
+      setConcept(data.concept || null);
+      setSimilar(data.similarInspiration || []);
+      setSearchWasConfigured(Boolean(data.searchConfigured));
+      setAnalysisKeywords(data.concept?.analysisKeywords || []);
+      setRegen(data.regen || null);
       appendMessage('user', clean);
-      appendMessage('bot', 'Updated the concept based on your feedback.');
+      appendMessage('bot', 'Updated the concept and re-rendered the room image.');
       toast.push({ variant: 'success', title: 'Concept refined' });
+      setGenerationProgress(100);
     } catch (err) {
+      setGenerationProgress(0);
       toast.push({ variant: 'error', title: 'Refine failed', message: err.message });
     } finally {
       setLoading(false);
@@ -163,7 +282,7 @@ export default function DashboardPage() {
     try {
       await api.post('/api/gemini/save-project', {
         name,
-        payload: { concept, similar },
+        payload: { concept, similar, regen },
       });
       appendMessage('bot', `Saved project "${name}".`);
       toast.push({ variant: 'success', title: 'Project saved', message: name });
@@ -177,9 +296,9 @@ export default function DashboardPage() {
   const centerBody = useMemo(() => {
     if (loading || concept) {
       return tab === 'renders' ? (
-        <RoomConcept concept={concept} loading={loading} />
+        <RoomConcept concept={concept} loading={loading} generationProgress={generationProgress} />
       ) : (
-        <BlueprintView notes={concept?.blueprintNotes} />
+        <BlueprintView notes={concept?.blueprintNotes} blueprint={concept?.blueprint} />
       );
     }
 
@@ -188,7 +307,7 @@ export default function DashboardPage() {
         <EmptyState
           tone="warn"
           title="Concept generation is disabled"
-          description="Set GEMINI_API_KEY on the server to enable AI-powered room design. The app keeps running in read-only mode."
+          description="Configure Vertex AI (project + location) on the server to enable AI-powered room design. The app keeps running in read-only mode."
         />
       );
     }
@@ -206,7 +325,7 @@ export default function DashboardPage() {
         description={`${files.length} file${files.length === 1 ? '' : 's'} queued. Click Generate to create your concept.`}
       />
     );
-  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length]);
+  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length, generationProgress]);
 
   const rightBody = useMemo(() => {
     if (loading) {
@@ -291,9 +410,22 @@ export default function DashboardPage() {
               className="btn-primary full mt-2"
               onClick={generate}
               disabled={generateDisabled}
-              title={!isGeminiConfigured && !configLoading ? 'GEMINI_API_KEY is not set on the server.' : undefined}
+              title={
+                !isGeminiConfigured && !configLoading
+                  ? 'AI is not configured on the server (Vertex project + location).'
+                  : undefined
+              }
             >
               {generateLabel}
+            </button>
+            <button
+              type="button"
+              className="btn-outline full mt-2"
+              onClick={resetWorkspace}
+              disabled={loading}
+              title={loading ? 'Please wait for generation to finish.' : 'Clear current chat, uploads, and concept.'}
+            >
+              Reset workspace
             </button>
             <AnalysisPanel keywords={analysisKeywords} title="Analysis" />
             {concept?.colorPalette ? <ColorPalette colors={concept.colorPalette} /> : null}

@@ -14,6 +14,16 @@ export function getGeminiApiKey() {
   return trimmed(process.env.GEMINI_API_KEY) || null;
 }
 
+export function getVertexConfig() {
+  return {
+    projectId:
+      trimmed(process.env.VERTEX_PROJECT_ID) ||
+      trimmed(process.env.GOOGLE_CLOUD_PROJECT) ||
+      trimmed(process.env.GCLOUD_PROJECT),
+    location: trimmed(process.env.VERTEX_LOCATION) || 'us-central1',
+  };
+}
+
 export function getPinterestConfig() {
   return {
     appId: trimmed(process.env.PINTEREST_APP_ID),
@@ -30,17 +40,32 @@ export function getGoogleSearchConfig() {
 }
 
 export function isGeminiConfigured() {
-  return Boolean(getGeminiApiKey());
+  // Server-side Gemini calls use Vertex AI only (`geminiService.js` + Flash Image).
+  const vx = getVertexConfig();
+  return Boolean(vx.projectId && vx.location);
 }
 
 export function isPinterestConfigured() {
   const { appId, appSecret } = getPinterestConfig();
-  return Boolean(appId && appSecret);
+  const devToken = trimmed(process.env.PINTEREST_DEV_ACCESS_TOKEN);
+  return Boolean((appId && appSecret) || devToken);
 }
 
 export function isGoogleSearchConfigured() {
   const { apiKey, engineId } = getGoogleSearchConfig();
   return Boolean(apiKey && engineId);
+}
+
+/**
+ * Vertex Gemini Flash Image preview (same GCP project as Vertex text).
+ * Set VERTEX_IMAGE_GENERATION=false to skip and fall back to search/stock only.
+ */
+export function isVertexFlashImagePreviewEnabled() {
+  if (trimmed(process.env.VERTEX_IMAGE_GENERATION).toLowerCase() === 'false') {
+    return false;
+  }
+  const vx = getVertexConfig();
+  return Boolean(vx.projectId && vx.location);
 }
 
 export function isFirebaseAdminConfigured() {
@@ -68,14 +93,14 @@ export function getServiceStatus() {
     configured: isGeminiConfigured(),
     reason: isGeminiConfigured()
       ? undefined
-      : 'GEMINI_API_KEY is not set. AI analysis and generation are disabled.',
+      : 'Vertex AI is not configured. Set VERTEX_PROJECT_ID (or GOOGLE_CLOUD_PROJECT) and VERTEX_LOCATION.',
   };
 
   const pinterest = {
     configured: isPinterestConfigured(),
     reason: isPinterestConfigured()
       ? undefined
-      : 'Pinterest OAuth app is not configured.',
+      : 'Pinterest is not configured. Set PINTEREST_APP_ID + PINTEREST_APP_SECRET, or PINTEREST_DEV_ACCESS_TOKEN for read-only dev.',
   };
 
   const googleSearch = {
@@ -85,10 +110,21 @@ export function getServiceStatus() {
       : 'Google Custom Search is not configured. Similar inspiration results will be hidden.',
   };
 
+  const vertexFlashImageEnabled = isVertexFlashImagePreviewEnabled();
+  const vertexFlashImage = {
+    configured: vertexFlashImageEnabled,
+    reason: vertexFlashImageEnabled
+      ? undefined
+      : trimmed(process.env.VERTEX_IMAGE_GENERATION).toLowerCase() === 'false'
+        ? 'Vertex image preview is disabled (VERTEX_IMAGE_GENERATION=false).'
+        : 'Vertex project/location is not set, so Gemini Flash Image preview is unavailable.',
+  };
+
   return {
     firebase,
     gemini,
     pinterest,
     googleSearch,
+    vertexFlashImage,
   };
 }

@@ -80,6 +80,41 @@ export const validateProcessUrl = [
   body('chatContext').optional().isString().isLength({ max: 8000 }),
 ];
 
+export const validateProcessUrls = [
+  body('urls')
+    .isArray({ min: 1, max: 6 })
+    .withMessage('urls must be an array of 1–6 https URLs'),
+  body('urls.*')
+    .isString()
+    .isLength({ min: 8, max: 2048 })
+    .custom(isSafePublicUrl)
+    .withMessage('each url must be a public https URL'),
+  body('chatContext').optional().isString().isLength({ max: 8000 }),
+  body('useRealisticFurniture')
+    .optional()
+    .custom((v) => v === true || v === false || v === 'true' || v === 'false')
+    .withMessage('useRealisticFurniture must be boolean'),
+];
+
+export const validateGooglePhotosSelection = [
+  body('items')
+    .isArray({ min: 1, max: 6 })
+    .withMessage('items must be an array of 1–6 Google Photos items'),
+  body('items.*.id').isString().isLength({ min: 1, max: 256 }).withMessage('each item must include an id'),
+  body('items.*.baseUrl')
+    .isString()
+    .isLength({ min: 8, max: 2048 })
+    .custom(isSafePublicUrl)
+    .withMessage('each item must include a public https baseUrl'),
+  body('items.*.mimeType').optional().isString().isLength({ max: 80 }),
+  body('items.*.filename').optional().isString().isLength({ max: 256 }),
+  body('chatContext').optional().isString().isLength({ max: 8000 }),
+  body('useRealisticFurniture')
+    .optional()
+    .custom((v) => v === true || v === false || v === 'true' || v === 'false')
+    .withMessage('useRealisticFurniture must be boolean'),
+];
+
 export const validateRefine = [
   body('previousConcept').isObject().withMessage('previousConcept is required'),
   body('feedback')
@@ -89,6 +124,17 @@ export const validateRefine = [
     .withMessage('feedback must be 1–2000 characters'),
 ];
 
+export const validateMediaRefine = [
+  body('previousConcept').isObject().withMessage('previousConcept is required'),
+  body('feedback')
+    .isString()
+    .withMessage('feedback is required')
+    .isLength({ min: 1, max: 2000 })
+    .withMessage('feedback must be 1–2000 characters'),
+  body('chatContext').optional().isString().isLength({ max: 8000 }),
+  body('regen').optional().isObject().withMessage('regen must be an object'),
+];
+
 export const validateSaveProject = [
   body('name')
     .isString()
@@ -96,6 +142,14 @@ export const validateSaveProject = [
     .isLength({ min: 1, max: 120 })
     .withMessage('name must be 1–120 characters'),
   body('payload').optional().isObject().withMessage('payload must be an object'),
+];
+
+export const validateProjectId = [
+  param('id')
+    .isString()
+    .withMessage('id is required')
+    .isLength({ min: 3, max: 128 })
+    .withMessage('id is invalid'),
 ];
 
 export const validateLogGeneration = [

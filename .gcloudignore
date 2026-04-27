@@ -1,0 +1,19 @@
+.git
+.github
+node_modules
+client/node_modules
+server/node_modules
+client/dist
+server/public
+.DS_Store
+*.log
+*.pem
+*.key
+serviceAccountKey.json
+
+# Ignore all env files by default (keeps secrets out of uploads)
+**/.env
+**/.env.*
+
+# But DO upload the client production env so the SPA has Firebase web config
+!client/.env.production

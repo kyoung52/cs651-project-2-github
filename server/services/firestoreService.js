@@ -82,6 +82,10 @@ export async function saveProject(uid, name, payload) {
         .add({
           name,
           payload,
+          ownerUid: uid,
+          ownerName: null,
+          published: false,
+          publishedAt: null,
           createdAt: new Date().toISOString(),
         });
       return ref.id;
@@ -108,6 +112,122 @@ export async function listProjects(uid) {
     },
     [],
     'firestore:listProjects'
+  );
+}
+
+export async function getProject(uid, projectId) {
+  return safeDb(
+    async (db) => {
+      const snap = await db
+        .collection('users')
+        .doc(uid)
+        .collection('projects')
+        .doc(projectId)
+        .get();
+      if (!snap.exists) return null;
+      return { id: snap.id, ...snap.data() };
+    },
+    null,
+    'firestore:getProject'
+  );
+}
+
+export async function deleteProject(uid, projectId) {
+  return safeDb(
+    async (db) => {
+      await db
+        .collection('users')
+        .doc(uid)
+        .collection('projects')
+        .doc(projectId)
+        .delete();
+      // Best-effort: remove from public feed too.
+      await db.collection('publishedProjects').doc(`${uid}_${projectId}`).delete().catch(() => {});
+      return true;
+    },
+    false,
+    'firestore:deleteProject'
+  );
+}
+
+export async function setProjectPublished(uid, projectId, published) {
+  return safeDb(
+    async (db) => {
+      const ref = db.collection('users').doc(uid).collection('projects').doc(projectId);
+      const snap = await ref.get();
+      if (!snap.exists) return false;
+      const data = snap.data() || {};
+      const publishedAt = published ? new Date().toISOString() : null;
+      await ref.set(
+        {
+          published: Boolean(published),
+          publishedAt,
+        },
+        { merge: true }
+      );
+
+      const feedRef = db.collection('publishedProjects').doc(`${uid}_${projectId}`);
+      if (published) {
+        await feedRef.set(
+          {
+            ownerUid: uid,
+            projectId,
+            name: data.name || null,
+            createdAt: data.createdAt || null,
+            publishedAt,
+            payload: data.payload || {},
+          },
+          { merge: true }
+        );
+      } else {
+        await feedRef.delete().catch(() => {});
+      }
+
+      return true;
+    },
+    false,
+    'firestore:setProjectPublished'
+  );
+}
+
+export async function listPublishedProjects(limit = 20) {
+  return safeDb(
+    async (db) => {
+      const snap = await db
+        .collection('publishedProjects')
+        .orderBy('publishedAt', 'desc')
+        .limit(limit)
+        .get();
+
+      return snap.docs.map((d) => {
+        const data = d.data() || {};
+        return {
+          id: data.projectId || d.id,
+          ownerUid: data.ownerUid || null,
+          name: data.name,
+          createdAt: data.createdAt,
+          publishedAt: data.publishedAt,
+          payload: data.payload || {},
+        };
+      });
+    },
+    [],
+    'firestore:listPublishedProjects'
+  );
+}
+
+export async function getPublishedProject(ownerUid, projectId) {
+  return safeDb(
+    async (db) => {
+      const snap = await db
+        .collection('publishedProjects')
+        .doc(`${ownerUid}_${projectId}`)
+        .get();
+      if (!snap.exists) return null;
+      return snap.data() || null;
+    },
+    null,
+    'firestore:getPublishedProject'
   );
 }
 

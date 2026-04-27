@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './hooks/useAuth.jsx';
 import { ConfigProvider } from './hooks/useConfig.jsx';
+import { WorkspaceProvider } from './hooks/useWorkspace.jsx';
 import { ToastProvider } from './components/ui/Toast.jsx';
 import './index.css';
 
@@ -13,7 +14,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <ConfigProvider>
         <ToastProvider>
           <AuthProvider>
-            <App />
+            <WorkspaceProvider>
+              <App />
+            </WorkspaceProvider>
           </AuthProvider>
         </ToastProvider>
       </ConfigProvider>

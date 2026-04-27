@@ -45,7 +45,8 @@ export function getGoogleProvider({ withMediaScopes = false } = {}) {
   if (withMediaScopes) {
     p.addScope('https://www.googleapis.com/auth/photoslibrary.readonly');
     p.addScope('https://www.googleapis.com/auth/youtube.readonly');
-    p.setCustomParameters({ prompt: 'consent' });
+    // Force account selection + re-consent so scopes actually apply.
+    p.setCustomParameters({ prompt: 'consent select_account' });
   }
   return p;
 }
