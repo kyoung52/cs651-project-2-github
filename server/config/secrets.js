@@ -68,6 +68,18 @@ export function isVertexFlashImagePreviewEnabled() {
   return Boolean(vx.projectId && vx.location);
 }
 
+/**
+ * Vertex Gemini grounded search ("googleSearch" tool) for related-items
+ * suggestions with live price context. Disabled if VERTEX_GROUNDING=false
+ * or if Vertex isn't configured at all. Region support varies — the route
+ * also catches per-call failures and returns an empty result with a reason.
+ */
+export function isGroundingConfigured() {
+  if (trimmed(process.env.VERTEX_GROUNDING).toLowerCase() === 'false') return false;
+  const vx = getVertexConfig();
+  return Boolean(vx.projectId && vx.location);
+}
+
 export function isFirebaseAdminConfigured() {
   if (trimmed(process.env.GOOGLE_APPLICATION_CREDENTIALS)) return true;
   return Boolean(
@@ -120,11 +132,22 @@ export function getServiceStatus() {
         : 'Vertex project/location is not set, so Gemini Flash Image preview is unavailable.',
   };
 
+  const groundedEnabled = isGroundingConfigured();
+  const grounding = {
+    configured: groundedEnabled,
+    reason: groundedEnabled
+      ? undefined
+      : trimmed(process.env.VERTEX_GROUNDING).toLowerCase() === 'false'
+        ? 'Grounded suggestions disabled (VERTEX_GROUNDING=false).'
+        : 'Vertex project/location is not set, so grounded suggestions are unavailable.',
+  };
+
   return {
     firebase,
     gemini,
     pinterest,
     googleSearch,
     vertexFlashImage,
+    grounding,
   };
 }

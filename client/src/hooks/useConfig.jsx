@@ -15,6 +15,7 @@ const DEFAULT_STATUS = {
   pinterest: { configured: false },
   googleSearch: { configured: false },
   vertexFlashImage: { configured: false },
+  grounding: { configured: false },
 };
 
 const ConfigContext = createContext({
@@ -48,6 +49,7 @@ export function ConfigProvider({ children }) {
       isPinterestConfigured: !!status.pinterest?.configured,
       isGoogleSearchConfigured: !!status.googleSearch?.configured,
       isVertexFlashImageConfigured: !!status.vertexFlashImage?.configured,
+      isGroundingConfigured: !!status.grounding?.configured,
       isFirebaseAdminConfigured: !!status.firebase?.configured,
     }),
     [status, loading]

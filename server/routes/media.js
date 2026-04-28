@@ -43,10 +43,13 @@ import {
   sendError,
   requireService,
 } from '../utils/httpError.js';
+import { registerJob, emit, end } from '../utils/jobStream.js';
 import { isGeminiConfigured, isGoogleSearchConfigured, isVertexFlashImagePreviewEnabled } from '../config/secrets.js';
 import {
   buildFlashImagePrompt,
+  buildFlashImageEditPrompt,
   generateRoomSceneDataUri,
+  generateRoomSceneEditDataUri,
   getVertexFlashImageModelId,
 } from '../services/geminiFlashImageService.js';
 
@@ -170,6 +173,35 @@ async function safeVertexFlashImagePreview({
 }
 
 /**
+ * Vertex edit-mode preview: edits the previous render in place. Falls back
+ * to null on any failure so the caller can decide what to render instead.
+ */
+async function safeVertexFlashImageEdit({
+  previousRender,
+  concept,
+  feedback,
+  audioAnalyses,
+  extraReferences,
+  regenSeed = '',
+}) {
+  if (!isVertexFlashImagePreviewEnabled()) return null;
+  if (!previousRender?.buffer || !previousRender?.mimeType) return null;
+  try {
+    return await generateRoomSceneEditDataUri({
+      previousRender,
+      concept,
+      feedback,
+      audioAnalyses,
+      extraReferences,
+      regenSeed,
+    });
+  } catch (err) {
+    console.warn('[media] vertex flash image edit skipped:', err.message);
+    return null;
+  }
+}
+
+/**
  * POST /api/media/process — multipart upload.
  */
 router.post(
@@ -189,10 +221,23 @@ router.post(
     const chatContext = typeof req.body.chatContext === 'string' ? req.body.chatContext : '';
     const useRealisticFurniture = req.body.useRealisticFurniture !== 'false';
     const regenSeed = crypto.randomUUID();
+    const jobId = typeof req.body.jobId === 'string' ? req.body.jobId : null;
+    if (jobId) {
+      registerJob(jobId, req.user?.uid);
+      // Belt-and-suspenders: always emit a final `done` once the response
+      // resolves, even on uncaught errors. end() is idempotent.
+      res.once('finish', () => end(jobId, { ok: res.statusCode < 400 }));
+      res.once('close', () => end(jobId, { ok: false, reason: 'closed' }));
+    }
 
     const imageAnalyses = [];
     const audioAnalyses = [];
     const referenceImages = [];
+
+    let imageIndex = 0;
+    let audioIndex = 0;
+    const totalImages = files.filter((f) => ALLOWED_IMAGE_MIMES.has(f.mimetype)).length;
+    const totalAudio = files.filter((f) => ALLOWED_AUDIO_MIMES.has(f.mimetype)).length;
 
     for (const file of files) {
       const buf = file.buffer;
@@ -204,27 +249,35 @@ router.post(
 
       if (!analysis) {
         if (ALLOWED_IMAGE_MIMES.has(mime)) {
+          if (jobId) emit(jobId, 'analyzing_image', { index: imageIndex + 1, total: totalImages });
           analysis = await analyzeImage(buf, mime);
           await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: mime, analysis });
         } else if (ALLOWED_AUDIO_MIMES.has(mime)) {
+          if (jobId) emit(jobId, 'analyzing_audio', { index: audioIndex + 1, total: totalAudio });
           analysis = await analyzeAudio(buf, mime);
           await setMediaCache(req.user?.uid, hash, { type: 'audio', mimeType: mime, analysis });
         } else {
           continue;
         }
+      } else if (jobId) {
+        if (ALLOWED_IMAGE_MIMES.has(mime)) emit(jobId, 'cache_hit_image', { index: imageIndex + 1, total: totalImages });
+        else if (ALLOWED_AUDIO_MIMES.has(mime)) emit(jobId, 'cache_hit_audio', { index: audioIndex + 1, total: totalAudio });
       }
 
       if (ALLOWED_IMAGE_MIMES.has(mime)) {
         imageAnalyses.push(analysis);
+        imageIndex += 1;
         if (referenceImages.length < 3) {
           referenceImages.push({ buffer: buf, mimeType: mime });
         }
       } else {
         audioAnalyses.push(analysis);
+        audioIndex += 1;
       }
     }
 
     if (imageAnalyses.length === 0 && audioAnalyses.length === 0) {
+      if (jobId) end(jobId, { ok: false, code: 'NO_VALID_MEDIA' });
       return sendError(
         res,
         400,
@@ -233,6 +286,7 @@ router.post(
       );
     }
 
+    if (jobId) emit(jobId, 'generating_concept');
     const concept = await generateRoomConcept({
       imageAnalyses,
       audioAnalyses,
@@ -244,8 +298,10 @@ router.post(
 
     const firstKeyword =
       concept.searchKeywords?.[0] || concept.styleLabel || 'modern interior';
+    if (jobId) emit(jobId, 'fetching_similar');
     const similar = await safeSimilarImages(firstKeyword);
     let featuredImage = similar[0]?.link || DEFAULT_FEATURED;
+    if (jobId && isVertexFlashImagePreviewEnabled()) emit(jobId, 'rendering_hero');
     const vertexImageUri = await safeVertexFlashImagePreview({
       concept,
       chatContext,
@@ -255,7 +311,9 @@ router.post(
     });
     if (vertexImageUri) featuredImage = vertexImageUri;
 
+    if (jobId) end(jobId, { ok: true });
     res.json({
+      jobId,
       concept: { ...concept, featuredImage },
       similarInspiration: similar,
       imageAnalyses,
@@ -707,6 +765,12 @@ router.post(
     const feedback = String(req.body.feedback || '').trim();
     const regen = typeof req.body.regen === 'string' ? tryJsonParse(req.body.regen) : req.body.regen;
     const chatContext = typeof req.body.chatContext === 'string' ? req.body.chatContext : '';
+    const jobId = typeof req.body.jobId === 'string' ? req.body.jobId : null;
+    if (jobId) {
+      registerJob(jobId, req.user?.uid);
+      res.once('finish', () => end(jobId, { ok: res.statusCode < 400 }));
+      res.once('close', () => end(jobId, { ok: false, reason: 'closed' }));
+    }
 
     const regenSeed = crypto.randomUUID();
 
@@ -726,13 +790,17 @@ router.post(
     const previousRenderFile = Array.isArray(req.files?.previousRender)
       ? req.files.previousRender[0]
       : null;
+    const hasUsablePreviousRender =
+      previousRenderFile && ALLOWED_IMAGE_MIMES.has(previousRenderFile.mimetype);
+
     const addedImageAnalyses = [];
     const addedAudioAnalyses = [];
     const referenceImages = [];
+    const editExtraReferences = [];
 
     // Visual continuity: prior generated image becomes the FIRST reference,
     // skipping analysis (it's our own output — no need to pay Vertex again).
-    if (previousRenderFile && ALLOWED_IMAGE_MIMES.has(previousRenderFile.mimetype)) {
+    if (hasUsablePreviousRender) {
       referenceImages.push({
         buffer: previousRenderFile.buffer,
         mimeType: previousRenderFile.mimetype,
@@ -749,9 +817,11 @@ router.post(
 
       if (!analysis) {
         if (ALLOWED_IMAGE_MIMES.has(mime)) {
+          if (jobId) emit(jobId, 'analyzing_image');
           analysis = await analyzeImage(buf, mime);
           await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: mime, analysis });
         } else if (ALLOWED_AUDIO_MIMES.has(mime)) {
+          if (jobId) emit(jobId, 'analyzing_audio');
           analysis = await analyzeAudio(buf, mime);
           await setMediaCache(req.user?.uid, hash, { type: 'audio', mimeType: mime, analysis });
         } else {
@@ -762,12 +832,14 @@ router.post(
       if (ALLOWED_IMAGE_MIMES.has(mime)) {
         addedImageAnalyses.push(analysis);
         if (referenceImages.length < 3) referenceImages.push({ buffer: buf, mimeType: mime });
+        if (editExtraReferences.length < 2) editExtraReferences.push({ buffer: buf, mimeType: mime });
       } else {
         addedAudioAnalyses.push(analysis);
       }
     }
 
     // 1) Update concept JSON using the refinement text (and previous concept).
+    if (jobId) emit(jobId, 'refining_concept');
     const refinedPatch = await refineConcept(previousConcept, feedback);
     const concept = { ...(previousConcept || {}), ...(refinedPatch || {}) };
 
@@ -779,27 +851,50 @@ router.post(
       chatContext || (typeof regen?.conceptGenInput?.chatContext === 'string' ? regen.conceptGenInput.chatContext : '');
     const chatWithFeedback = `${effectiveChat}\n${feedback}`.trim();
 
-    const flashImagePrompt = buildFlashImagePrompt({
-      concept,
-      chatContext: chatWithFeedback,
-      audioAnalyses,
-      regenSeed,
-    });
+    // Edit mode (preferred): if the client sent the prior render, use the
+    // edit prompt + previousRender as the base image. The model preserves
+    // composition, layout, and identifiable furniture, applying only the
+    // user's requested change. Falls back to fresh generation when the
+    // previous render is missing (older clients) or when edit fails.
+    const flashImagePrompt = hasUsablePreviousRender
+      ? buildFlashImageEditPrompt({ concept, feedback, audioAnalyses, regenSeed })
+      : buildFlashImagePrompt({ concept, chatContext: chatWithFeedback, audioAnalyses, regenSeed });
 
     let featuredImage = DEFAULT_FEATURED;
-    const vertexImageUri = await safeVertexFlashImagePreview({
-      concept,
-      chatContext: chatWithFeedback,
-      referenceImages,
-      audioAnalyses,
-      regenSeed,
-    });
+    let vertexImageUri = null;
+    if (hasUsablePreviousRender) {
+      if (jobId) emit(jobId, 'editing_render');
+      vertexImageUri = await safeVertexFlashImageEdit({
+        previousRender: {
+          buffer: previousRenderFile.buffer,
+          mimeType: previousRenderFile.mimetype,
+        },
+        concept,
+        feedback,
+        audioAnalyses,
+        extraReferences: editExtraReferences,
+        regenSeed,
+      });
+    }
+    if (!vertexImageUri) {
+      if (jobId && isVertexFlashImagePreviewEnabled()) emit(jobId, 'rendering_hero');
+      vertexImageUri = await safeVertexFlashImagePreview({
+        concept,
+        chatContext: chatWithFeedback,
+        referenceImages,
+        audioAnalyses,
+        regenSeed,
+      });
+    }
     if (vertexImageUri) featuredImage = vertexImageUri;
 
     const firstKeyword = concept.searchKeywords?.[0] || concept.styleLabel || 'modern interior';
+    if (jobId) emit(jobId, 'fetching_similar');
     const similar = await safeSimilarImages(firstKeyword);
 
+    if (jobId) end(jobId, { ok: true });
     res.json({
+      jobId,
       concept: { ...concept, featuredImage },
       similarInspiration: similar,
       regen: {

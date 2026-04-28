@@ -212,6 +212,29 @@ function parseJsonFromResponse(text) {
   }
 }
 
+function clampStringArray(value, maxItems, maxLen) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((s) => typeof s === 'string' && s.trim().length > 0)
+    .slice(0, maxItems)
+    .map((s) => s.slice(0, maxLen));
+}
+
+/**
+ * Ensure the model's interpretation block matches our expected shape and
+ * is safe to render. Drops unknown keys, clamps array lengths and string
+ * sizes. Returns an object with all four arrays present (possibly empty).
+ */
+export function normalizeInterpretation(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  return {
+    fromImages: clampStringArray(r.fromImages, 5, 240),
+    fromAudio: clampStringArray(r.fromAudio, 4, 240),
+    fromPrompt: clampStringArray(r.fromPrompt, 4, 240),
+    decisionTrace: clampStringArray(r.decisionTrace, 3, 320),
+  };
+}
+
 function extractTextFromVertexResponse(result) {
   const candidate = result?.response?.candidates?.[0];
   const parts = candidate?.content?.parts;
@@ -237,7 +260,9 @@ Return ONLY valid JSON with this exact shape (no markdown):
   "styleTags": ["string", ...],
   "materials": ["string", ...],
   "roomType": "string or unknown",
-  "summary": "one sentence"
+  "detectedRoomType": "bedroom|living|kitchen|dining|bath|office|outdoor|other|unknown",
+  "salientCues": ["short phrase about a visual feature you anchored on", ...],
+  "ignoredCues": ["short phrase about something visible you intentionally de-prioritized", ...]
 }`;
 
   try {
@@ -298,7 +323,8 @@ Return ONLY valid JSON (no markdown) with this exact shape:
   "materialMood": ["string", ...],
   "styleAssociations": ["string", ...],
   "spatialFeel": ["cozy|open|minimal|maximal|warm|cool|dramatic|serene|other", ...],
-  "summary": "one sentence describing the room vibe this audio suggests"
+  "transcriptExcerpt": "up to 240 chars of paraphrased spoken content if speech is present, else empty string",
+  "extractedTone": ["short tone descriptors you derived from the audio", ...]
 }`;
 
   try {
@@ -411,8 +437,16 @@ Return ONLY valid JSON (no markdown):
         "rotation": 0
       }
     ]
+  },
+  "interpretation": {
+    "fromImages": ["short bullet of what each image contributed (palette, layout cue, vibe). Up to 5 bullets.", ...],
+    "fromAudio": ["short bullet of what the audio contributed (energy, lighting, era, tempo). Up to 4 bullets.", ...],
+    "fromPrompt": ["short bullet of what the user's text asked for. Up to 4 bullets.", ...],
+    "decisionTrace": ["1-3 sentences total explaining how you weighed and combined the inputs into the final concept.", ...]
   }
-}`;
+}
+
+The interpretation block is required. Each array stays empty when no signal of that kind was provided. Do not invent content for missing inputs.`;
 
   try {
     const result = await generateContentWithModelFallback({
@@ -426,7 +460,11 @@ Return ONLY valid JSON (no markdown):
       },
     });
     const text = extractTextFromVertexResponse(result);
-    return parseJsonFromResponse(text);
+    const parsed = parseJsonFromResponse(text);
+    if (parsed && typeof parsed === 'object') {
+      parsed.interpretation = normalizeInterpretation(parsed.interpretation);
+    }
+    return parsed;
   } catch (err) {
     if (err instanceof HttpError) throw err;
     console.warn('[vertex:concept]', err?.message || err);
@@ -455,7 +493,7 @@ ${FENCE}
 ${safeFeedback}
 ${FENCE}
 
-Return the same JSON shape as generateRoomConcept with updated fields. Ensure blueprintNotes and blueprint (including element positions/sizes) are updated if the changes affect layout. Valid JSON only, no markdown.`;
+Return the same JSON shape as generateRoomConcept with updated fields, including the "interpretation" block with arrays {fromImages, fromAudio, fromPrompt, decisionTrace}. The decisionTrace SHOULD reference what changed in this refine. Ensure blueprintNotes and blueprint (including element positions/sizes) are updated if the changes affect layout. Valid JSON only, no markdown.`;
   try {
     const result = await generateContentWithModelFallback({
       client,
@@ -468,7 +506,11 @@ Return the same JSON shape as generateRoomConcept with updated fields. Ensure bl
       },
     });
     const text = extractTextFromVertexResponse(result);
-    return parseJsonFromResponse(text);
+    const parsed = parseJsonFromResponse(text);
+    if (parsed && typeof parsed === 'object') {
+      parsed.interpretation = normalizeInterpretation(parsed.interpretation);
+    }
+    return parsed;
   } catch (err) {
     if (err instanceof HttpError) throw err;
     console.warn('[vertex:refine]', err?.message || err);

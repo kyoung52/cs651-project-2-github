@@ -33,14 +33,41 @@ async function downloadImage(src, filenameBase) {
 
 /**
  * Center column: featured image + concept text + keyword chips.
+ *
+ * `phaseLabel` and `phaseHistory` come from the SSE phase stream in
+ * DashboardPage. Each visited phase becomes a checked row so users can see
+ * the pipeline progress beyond a single bar.
  */
-export default function RoomConcept({ concept, loading, generationProgress = 0, rerenderingHero = false }) {
+export default function RoomConcept({
+  concept,
+  loading,
+  generationProgress = 0,
+  rerenderingHero = false,
+  phaseLabel = '',
+  phaseHistory = [],
+  phaseCopy = (s) => s,
+}) {
   if (loading) {
     return (
       <div className="panel main-panel center-placeholder">
         <div className="spinner large" />
-        <p>Generating your room concept…</p>
+        <p>{phaseLabel || 'Generating your room concept…'}</p>
         <GenerationProgressBar value={generationProgress} label="AI progress" />
+        {phaseHistory.length > 0 ? (
+          <ul className="phase-list">
+            {phaseHistory.map((p, i) => {
+              const isLast = i === phaseHistory.length - 1;
+              return (
+                <li key={`${p}-${i}`} className={isLast ? 'phase-row current' : 'phase-row done'}>
+                  <span className="phase-icon" aria-hidden="true">
+                    {isLast ? '…' : '✓'}
+                  </span>
+                  <span className="phase-text">{phaseCopy(p)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
     );
   }

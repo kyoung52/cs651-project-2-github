@@ -652,6 +652,37 @@ code {
   margin-top: 1rem;
 }
 
+.interpretation-panel {
+  margin-top: 1rem;
+}
+
+.interpretation-section {
+  margin-top: 0.85rem;
+}
+
+.interpretation-section:first-of-type {
+  margin-top: 0.35rem;
+}
+
+.interpretation-section .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.interpretation-list {
+  list-style: disc;
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.interpretation-list li + li {
+  margin-top: 0.25rem;
+}
+
 .analysis-block .label {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -751,6 +782,157 @@ code {
   transition: width 0.25s ease-out;
 }
 
+.phase-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.85rem 0 0;
+  width: min(100%, 320px);
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.phase-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+
+.phase-row.done {
+  color: var(--muted);
+}
+
+.phase-row.current {
+  color: var(--text, inherit);
+  font-weight: 500;
+}
+
+.phase-icon {
+  display: inline-flex;
+  width: 1.1rem;
+  justify-content: center;
+  font-family: monospace;
+}
+
+.phase-row.done .phase-icon {
+  color: var(--accent);
+}
+
+.related-panel {
+  margin-top: 1rem;
+}
+
+.related-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+}
+
+.related-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.related-card {
+  background: #1d1d20;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+
+.related-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.related-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1.25;
+}
+
+.related-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.related-price {
+  color: var(--text, inherit);
+  font-weight: 600;
+}
+
+.related-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  line-height: 1.35;
+}
+
+.related-badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.related-badge.badge-pos {
+  background: rgba(80, 200, 120, 0.15);
+  color: rgb(120, 220, 150);
+}
+
+.related-badge.badge-neutral {
+  background: rgba(150, 150, 170, 0.15);
+  color: rgb(180, 180, 200);
+}
+
+.related-badge.badge-warn {
+  background: rgba(220, 170, 80, 0.15);
+  color: rgb(230, 190, 110);
+}
+
+.related-citations {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.related-citations .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.related-citations ul {
+  list-style: disc;
+  padding-left: 1.1rem;
+  margin: 0.3rem 0 0;
+}
+
+.related-citations a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.related-citations a:hover {
+  text-decoration: underline;
+}
+
+.related-disclaimer {
+  margin-top: 0.55rem;
+  line-height: 1.35;
+}
+
 .project-list {
   list-style: none;
   padding: 0;
@@ -787,6 +969,22 @@ code {
   color: var(--danger);
   background: var(--danger-soft);
   animation: roomify-rec-pulse 1.4s ease-in-out infinite;
+}
+
+.camera-preview {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem;
+  background: #1d1d20;
+}
+
+.camera-video {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  border-radius: 6px;
+  background: #000;
+  object-fit: cover;
 }
 
 @keyframes roomify-rec-pulse {

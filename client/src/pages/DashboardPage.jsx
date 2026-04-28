@@ -10,8 +10,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ChatBot from '../components/ChatBot.jsx';
 import RoomConcept from '../components/RoomConcept.jsx';
 import SimilarInspiration from '../components/SimilarInspiration.jsx';
+import RelatedItems from '../components/RelatedItems.jsx';
 import AnalysisPanel from '../components/AnalysisPanel.jsx';
 import ColorPalette from '../components/ColorPalette.jsx';
+import InterpretationPanel, { legacyInterpretation } from '../components/InterpretationPanel.jsx';
 import MediaUpload from '../components/MediaUpload.jsx';
 import BlueprintView from '../components/BlueprintView.jsx';
 import Navbar from '../components/Navbar.jsx';
@@ -20,6 +22,7 @@ import EmptyState from '../components/ui/EmptyState.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import { useConfig } from '../hooks/useConfig.jsx';
 import { useWorkspace } from '../hooks/useWorkspace.jsx';
+import { useAuth } from '../hooks/useAuth.jsx';
 import { api } from '../services/api.js';
 import { sanitizeChatInput } from '../utils/validators.js';
 
@@ -28,9 +31,34 @@ const WELCOME_MESSAGE = {
   text: "Hi — describe your space, upload images or audio, and I'll suggest a cohesive style direction.",
 };
 
+/**
+ * Human-readable copy for each phase event the server emits. Anything not in
+ * this map falls through to a sentence-cased version of the phase string.
+ */
+const PHASE_COPY = {
+  analyzing_image: 'Analyzing image…',
+  analyzing_audio: 'Analyzing audio…',
+  cache_hit_image: 'Using cached image analysis',
+  cache_hit_audio: 'Using cached audio analysis',
+  generating_concept: 'Generating room concept…',
+  refining_concept: 'Refining concept…',
+  rendering_hero: 'Rendering hero image…',
+  editing_render: 'Editing previous render…',
+  fetching_similar: 'Finding similar inspiration…',
+  waiting: 'Connecting…',
+};
+
+function phaseLabel(phase) {
+  if (!phase) return '';
+  if (PHASE_COPY[phase]) return PHASE_COPY[phase];
+  const cleaned = String(phase).replace(/_/g, ' ');
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1) + '…';
+}
+
 export default function DashboardPage() {
-  const { isGeminiConfigured, isGoogleSearchConfigured, loading: configLoading } = useConfig();
+  const { isGeminiConfigured, isGoogleSearchConfigured, isGroundingConfigured, loading: configLoading } = useConfig();
   const { dashboardState, setDashboardState, resetDashboardState } = useWorkspace();
+  const { idToken } = useAuth();
   const toast = useToast();
 
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
@@ -52,6 +80,10 @@ export default function DashboardPage() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [rerenderingHero, setRerenderingHero] = useState(false);
+  // Live phase from the server's SSE stream (e.g. "analyzing_image",
+  // "rendering_hero"). Cleared whenever loading flips off.
+  const [phase, setPhase] = useState('');
+  const [phaseHistory, setPhaseHistory] = useState([]);
 
   // Restore workspace state when returning to the Dashboard route.
   useEffect(() => {
@@ -167,13 +199,19 @@ export default function DashboardPage() {
   }, [configLoading, isGeminiConfigured]);
 
   useEffect(() => {
-    if (!loading) return undefined;
+    if (!loading) {
+      setPhase('');
+      setPhaseHistory([]);
+      return undefined;
+    }
+    // Random tick is a fallback only — real progress comes from the SSE
+    // phase events. Slow it down so it doesn't outrun reality.
     const id = setInterval(() => {
       setGenerationProgress((p) => {
         if (p >= 92) return p;
-        return p + 1 + Math.random() * 2.2;
+        return p + 0.6 + Math.random() * 0.8;
       });
-    }, 360);
+    }, 720);
     return () => clearInterval(id);
   }, [loading]);
 
@@ -182,6 +220,48 @@ export default function DashboardPage() {
     const t = setTimeout(() => setGenerationProgress(0), 450);
     return () => clearTimeout(t);
   }, [loading, generationProgress]);
+
+  /**
+   * Open an EventSource for the given jobId and pump phase events into
+   * `phase`/`phaseHistory`. The token is passed via query string because
+   * EventSource cannot set Authorization headers. Returns a cleanup fn.
+   */
+  const openPhaseStream = useCallback((jobId) => {
+    if (!jobId) return () => {};
+    const tokenParam = idToken ? `?t=${encodeURIComponent(idToken)}` : '';
+    let es;
+    try {
+      es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events${tokenParam}`);
+    } catch {
+      return () => {};
+    }
+    const onPhase = (e) => {
+      try {
+        const payload = JSON.parse(e.data || '{}');
+        const p = payload?.phase || '';
+        if (!p) return;
+        setPhase(p);
+        setPhaseHistory((h) => (h[h.length - 1] === p ? h : [...h, p]));
+        // Bump the bar by a small amount on each new phase for a "real"
+        // feeling progression. Caps at 92 so the final 100 remains the
+        // success indicator.
+        setGenerationProgress((cur) => Math.min(92, Math.max(cur, cur + 8)));
+      } catch {}
+    };
+    const onDone = () => {
+      try { es.close(); } catch {}
+    };
+    es.addEventListener('phase', onPhase);
+    es.addEventListener('done', onDone);
+    es.addEventListener('closed', onDone);
+    es.onerror = () => {
+      // Browser will auto-retry. If the job is already done, the next
+      // connection will replay the buffered `done` and close cleanly.
+    };
+    return () => {
+      try { es.close(); } catch {}
+    };
+  }, [idToken]);
 
   const onSend = (text) => {
     const clean = sanitizeChatInput(text);
@@ -223,11 +303,16 @@ export default function DashboardPage() {
 
     setGenerationProgress(6);
     setLoading(true);
+    const jobId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `job-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const closePhaseStream = openPhaseStream(jobId);
     try {
       const fd = new FormData();
       files.forEach((f) => fd.append('files', f));
       fd.append('chatContext', chatContext);
       fd.append('useRealisticFurniture', realistic ? 'true' : 'false');
+      fd.append('jobId', jobId);
 
       const { data } = await api.post('/api/media/process', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -259,37 +344,54 @@ export default function DashboardPage() {
       toast.push({ variant: 'error', title: 'Generation failed', message: err.message });
     } finally {
       setLoading(false);
+      try { closePhaseStream(); } catch {}
     }
   };
 
   const submitRefine = async () => {
     const clean = sanitizeChatInput(refineText);
     if (!clean) return;
+
+    // Refine edits the existing render; without a prior image, there's nothing
+    // to edit. Prompt the user to generate a concept first.
+    const prior = concept?.featuredImage;
+    const hasEditableImage = typeof prior === 'string' && prior.startsWith('data:image/');
+    if (!hasEditableImage) {
+      toast.push({
+        variant: 'warn',
+        title: 'Generate a concept first',
+        message: 'Refine works on an existing render. Generate a room concept, then refine it.',
+      });
+      return;
+    }
+
     setRefineOpen(false);
     setGenerationProgress(10);
     setLoading(true);
+    const jobId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `job-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const closePhaseStream = openPhaseStream(jobId);
     try {
       const fd = new FormData();
       // Allow refining with any current uploads (and any newly added files).
       files.forEach((f) => fd.append('files', f));
+      fd.append('jobId', jobId);
 
       // Strip featuredImage before stringifying. A 1-2 MB data: URI inside a
       // multipart text field would blow past multer's per-field size limit
       // and silently break refines. Send the prior render separately as a
-      // file part so the server uses it as a visual reference for continuity.
+      // file part so the server uses it as the EDIT base for the new render.
       const conceptForJson = concept ? { ...concept, featuredImage: null } : {};
       fd.append('previousConcept', JSON.stringify(conceptForJson));
-      const prior = concept?.featuredImage;
-      if (typeof prior === 'string' && prior.startsWith('data:image/')) {
-        try {
-          const blob = await (await fetch(prior)).blob();
-          if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
-            fd.append('previousRender', blob, 'previous-render.png');
-          }
-        } catch (e) {
-          // Non-fatal — refine still works without the visual reference.
-          console.warn('[refine] could not attach previous render:', e?.message || e);
+      try {
+        const blob = await (await fetch(prior)).blob();
+        if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
+          fd.append('previousRender', blob, 'previous-render.png');
         }
+      } catch (e) {
+        // Non-fatal — server falls back to fresh generation if the part is missing.
+        console.warn('[refine] could not attach previous render:', e?.message || e);
       }
 
       fd.append('feedback', clean);
@@ -307,8 +409,12 @@ export default function DashboardPage() {
       setAnalysisKeywords(data.concept?.analysisKeywords || []);
       setRegen(data.regen || null);
       appendMessage('user', clean);
-      appendMessage('bot', 'Updated the concept and re-rendered the room image.');
-      toast.push({ variant: 'success', title: 'Concept refined' });
+      appendMessage('bot', 'Edited the existing render to match your feedback.');
+      toast.push({
+        variant: 'success',
+        title: 'Refined render',
+        message: 'Overall composition kept, your changes applied.',
+      });
       setGenerationProgress(100);
     } catch (err) {
       setGenerationProgress(0);
@@ -316,6 +422,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
       setRefineText('');
+      try { closePhaseStream(); } catch {}
     }
   };
 
@@ -345,6 +452,9 @@ export default function DashboardPage() {
           loading={loading}
           generationProgress={generationProgress}
           rerenderingHero={rerenderingHero}
+          phaseLabel={phaseLabel(phase)}
+          phaseHistory={phaseHistory}
+          phaseCopy={phaseLabel}
         />
       ) : (
         <BlueprintView notes={concept?.blueprintNotes} blueprint={concept?.blueprint} />
@@ -374,7 +484,7 @@ export default function DashboardPage() {
         description={`${files.length} file${files.length === 1 ? '' : 's'} queued. Click Generate to create your concept.`}
       />
     );
-  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length, generationProgress, rerenderingHero]);
+  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length, generationProgress, rerenderingHero, phase, phaseHistory]);
 
   const rightBody = useMemo(() => {
     if (loading) {
@@ -405,8 +515,13 @@ export default function DashboardPage() {
         </div>
       );
     }
-    return <SimilarInspiration results={similar} />;
-  }, [loading, concept, similar, searchWasConfigured, isGoogleSearchConfigured]);
+    return (
+      <>
+        <SimilarInspiration results={similar} />
+        <RelatedItems concept={concept} enabled={isGroundingConfigured} />
+      </>
+    );
+  }, [loading, concept, similar, searchWasConfigured, isGoogleSearchConfigured, isGroundingConfigured]);
 
   const generateDisabled = loading || !files.length || (!configLoading && !isGeminiConfigured);
   const generateLabel = loading
@@ -535,6 +650,11 @@ export default function DashboardPage() {
               Search real items
             </button>
           </div>
+          {concept ? (
+            <InterpretationPanel
+              interpretation={concept.interpretation || legacyInterpretation(concept, regen)}
+            />
+          ) : null}
         </section>
 
         <section className="col-right">{rightBody}</section>
@@ -560,6 +680,11 @@ export default function DashboardPage() {
           </>
         }
       >
+        <p className="muted small" style={{ marginBottom: '0.5rem' }}>
+          Refine edits this image. I'll modify the current render to match your
+          feedback — same room, same layout, just adjusted. To start over with
+          new inputs, use Generate room concept instead.
+        </p>
         <label htmlFor="refine-text" className="label">
           Tell Roomify what to change
         </label>

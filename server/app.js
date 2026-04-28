@@ -20,6 +20,8 @@ import geminiRoutes from './routes/gemini.js';
 import searchRoutes from './routes/search.js';
 import configRoutes from './routes/config.js';
 import exploreRoutes from './routes/explore.js';
+import jobsRoutes from './routes/jobs.js';
+import relatedRoutes from './routes/related.js';
 import { requestLoggingMiddleware } from './middleware/requestLogging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,6 +219,8 @@ export function createApp({ isProd = process.env.NODE_ENV === 'production' } = {
   app.use('/api/gemini', geminiRoutes);
   app.use('/api/search', searchRoutes);
   app.use('/api/explore', exploreRoutes);
+  app.use('/api/jobs', jobsRoutes);
+  app.use('/api/related', relatedRoutes);
 
   app.use(uploadErrorHandler);
 

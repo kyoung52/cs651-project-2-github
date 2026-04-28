@@ -92,6 +92,7 @@ export async function fetchConfig() {
         pinterest: { configured: false },
         googleSearch: { configured: false },
         vertexFlashImage: { configured: false },
+        grounding: { configured: false },
       },
     };
   }

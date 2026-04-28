@@ -33,6 +33,45 @@ function vertexProjectAndLocation() {
   return { project, location };
 }
 
+export function buildFlashImageEditPrompt({
+  concept,
+  feedback = '',
+  audioAnalyses = [],
+  regenSeed = '',
+} = {}) {
+  const conceptBlock = JSON.stringify({
+    title: concept?.title,
+    styleLabel: concept?.styleLabel,
+    conceptDescription: concept?.conceptDescription,
+    colorPalette: concept?.colorPalette,
+    blueprintNotes: concept?.blueprintNotes,
+    blueprint: concept?.blueprint,
+  }).slice(0, 8000);
+
+  const audioBlock =
+    Array.isArray(audioAnalyses) && audioAnalyses.length
+      ? `AUDIO_BRIEF (mood/lighting cues only — do not let it change the room layout):\n${JSON.stringify(audioAnalyses).slice(0, 4000)}`
+      : 'AUDIO_BRIEF: (none)';
+
+  return `You are Roomify's interior visualization model in EDIT mode.
+
+You are EDITING the attached previous render. Preserve the overall composition,
+camera angle, room layout, lighting direction, and identifiable furniture.
+Apply ONLY the user's requested change below. Do not redesign the room.
+
+Regen seed: ${String(regenSeed || '').slice(0, 200)}
+
+User's requested change:
+${String(feedback || '').slice(0, 2000) || '(no feedback provided — adjust subtly)'}
+
+Updated structured concept (JSON, for reference of palette/material direction only):
+${conceptBlock}
+
+${audioBlock}
+
+Output requirements: keep wide-angle editorial framing, soft natural light, no people, no text, no logos, no watermarks. Return exactly ONE photorealistic image.`;
+}
+
 export function buildFlashImagePrompt({
   concept,
   chatContext = '',
@@ -171,6 +210,102 @@ export async function generateRoomSceneDataUri({
   const uri = extractImageDataUri(response);
   if (!uri) {
     console.warn('[vertex:flash-image] no image in response');
+  }
+  return uri;
+}
+
+/**
+ * Edit-mode hero render: starts from the previous render and applies the
+ * user's feedback while preserving composition, layout, and identifiable
+ * furniture. Used by /api/media/refine when a previousRender file is present.
+ *
+ * @param {object} params
+ * @param {{ buffer: Buffer, mimeType: string }} params.previousRender — required, used as the FIRST reference
+ * @param {object} params.concept
+ * @param {string} params.feedback
+ * @param {object[]} [params.audioAnalyses]
+ * @param {{ buffer: Buffer, mimeType: string }[]} [params.extraReferences] — additional refs (max 2 — leaves slot for previousRender)
+ * @param {string} [params.regenSeed]
+ * @returns {Promise<string|null>} data: URI for <img src> or null
+ */
+export async function generateRoomSceneEditDataUri({
+  previousRender,
+  concept,
+  feedback = '',
+  audioAnalyses = [],
+  extraReferences = [],
+  regenSeed = '',
+}) {
+  if (!previousRender?.buffer || !previousRender?.mimeType) return null;
+  const pl = vertexProjectAndLocation();
+  if (!pl) return null;
+
+  const client = new GoogleGenAI({
+    vertexai: true,
+    project: pl.project,
+    location: pl.location,
+  });
+
+  const textPrompt = buildFlashImageEditPrompt({
+    concept,
+    feedback,
+    audioAnalyses,
+    regenSeed,
+  });
+
+  const parts = [createPartFromText(textPrompt)];
+
+  // FIRST reference: previous render. The model is instructed to edit this image.
+  const prevB64 = Buffer.isBuffer(previousRender.buffer)
+    ? previousRender.buffer.toString('base64')
+    : Buffer.from(previousRender.buffer).toString('base64');
+  parts.push(createPartFromBase64(prevB64, previousRender.mimeType));
+
+  for (const img of (extraReferences || []).slice(0, 2)) {
+    if (!img?.buffer || !img?.mimeType) continue;
+    const b64 = Buffer.isBuffer(img.buffer) ? img.buffer.toString('base64') : Buffer.from(img.buffer).toString('base64');
+    parts.push(createPartFromBase64(b64, img.mimeType));
+  }
+
+  const contents = createUserContent(parts);
+
+  let response;
+  const start = Date.now();
+  try {
+    response = await client.models.generateContent({
+      model: getVertexFlashImageModelId(),
+      contents,
+      config: {
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+      },
+    });
+  } catch (err) {
+    console.warn('[vertex:flash-image:edit] generateContent failed:', err?.message || err);
+    logExternalApiCall({
+      service: 'vertex_ai',
+      operation: 'gemini_flash_image_edit',
+      method: 'POST',
+      url: `vertex:${getVertexFlashImageModelId()}`,
+      status: err?.code ? Number(err.code) : undefined,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err?.message || String(err),
+    });
+    return null;
+  }
+  logExternalApiCall({
+    service: 'vertex_ai',
+    operation: 'gemini_flash_image_edit',
+    method: 'POST',
+    url: `vertex:${getVertexFlashImageModelId()}`,
+    status: 200,
+    ok: true,
+    durationMs: Date.now() - start,
+  });
+
+  const uri = extractImageDataUri(response);
+  if (!uri) {
+    console.warn('[vertex:flash-image:edit] no image in response');
   }
   return uri;
 }

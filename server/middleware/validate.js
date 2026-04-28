@@ -104,6 +104,11 @@ export async function assertSafePublicUrl(value) {
 
 /* ----------------------------- Route chains ------------------------------ */
 
+// jobId is optional and arrives as a string over multipart. We validate the
+// shape (UUID-ish) so a hostile client can't poison the in-memory map with
+// huge keys or non-strings.
+const JOB_ID_REGEX = /^[a-zA-Z0-9_-]{8,128}$/;
+
 export const validateProcessMedia = [
   body('chatContext')
     .optional()
@@ -115,6 +120,11 @@ export const validateProcessMedia = [
     .optional()
     .custom((v) => v === true || v === false || v === 'true' || v === 'false')
     .withMessage('useRealisticFurniture must be boolean'),
+  body('jobId')
+    .optional()
+    .isString()
+    .matches(JOB_ID_REGEX)
+    .withMessage('jobId must be 8–128 url-safe characters'),
 ];
 
 export const validateProcessUrl = [
@@ -182,6 +192,11 @@ export const validateMediaRefine = [
     .isLength({ min: 1, max: 2000 })
     .withMessage('feedback must be 1–2000 characters'),
   body('chatContext').optional().isString().isLength({ max: 8000 }),
+  body('jobId')
+    .optional()
+    .isString()
+    .matches(JOB_ID_REGEX)
+    .withMessage('jobId must be 8–128 url-safe characters'),
 ];
 
 export const validateSaveProject = [

@@ -29,33 +29,46 @@ function extForMime(mime) {
 }
 
 /**
- * File input + in-browser audio recorder.
+ * File input + in-browser audio recorder + in-browser camera capture.
  *
  * - Upload path: existing file picker, validates against accept list / size.
  * - Record path: MediaRecorder captures mic audio, packages it as a File and
  *   hands it to onFiles with the same shape as a picked file. Solves the
  *   "audio must be captured by the app" rubric requirement.
+ * - Camera path: getUserMedia + a live <video> preview; on capture we paint
+ *   the current frame to a <canvas>, convert to a JPEG Blob, and hand it to
+ *   onFiles as a File. On browsers without getUserMedia (or when the user
+ *   denies it), a hidden `<input capture="environment">` is used as a
+ *   fallback — on mobile this opens the native camera app directly.
  */
 export default function MediaUpload({ onFiles, disabled, multiple = true }) {
   const ref = useRef(null);
+  const cameraInputRef = useRef(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const tickRef = useRef(null);
   const stopTimerRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+  const videoRef = useRef(null);
 
   const [recording, setRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [recordError, setRecordError] = useState('');
   const [recorderSupported, setRecorderSupported] = useState(true);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [cameraSupported, setCameraSupported] = useState(true);
 
   useEffect(() => {
+    const hasGetUserMedia =
+      typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
     setRecorderSupported(
       typeof window !== 'undefined' &&
         typeof window.MediaRecorder !== 'undefined' &&
-        typeof navigator !== 'undefined' &&
-        Boolean(navigator.mediaDevices?.getUserMedia)
+        hasGetUserMedia
     );
+    setCameraSupported(hasGetUserMedia);
   }, []);
 
   useEffect(() => {
@@ -67,6 +80,7 @@ export default function MediaUpload({ onFiles, disabled, multiple = true }) {
         }
       } catch {}
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (tickRef.current) clearInterval(tickRef.current);
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
     };
@@ -84,6 +98,99 @@ export default function MediaUpload({ onFiles, disabled, multiple = true }) {
     }
     if (ok.length) onFiles(ok);
     e.target.value = '';
+  };
+
+  const stopCameraStream = () => {
+    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+    cameraStreamRef.current = null;
+    if (videoRef.current) {
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+  };
+
+  const closeCamera = () => {
+    stopCameraStream();
+    setCameraOpen(false);
+  };
+
+  const openCamera = async () => {
+    if (disabled || cameraOpen) return;
+    setCameraError('');
+
+    // No getUserMedia available — fall back to the OS camera via the
+    // hidden input. On mobile this opens the native camera; on desktop
+    // it just opens the file picker.
+    if (!cameraSupported) {
+      cameraInputRef.current?.click();
+      return;
+    }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        // `environment` prefers the rear camera on phones; desktop
+        // browsers ignore it and pick the default webcam.
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+    } catch (err) {
+      const msg =
+        err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
+          ? 'Camera permission was denied. Allow camera access in your browser, or upload a photo instead.'
+          : 'No camera available. Upload a photo instead.';
+      setCameraError(msg);
+      // Fallback: trigger the OS camera picker (mobile) or the file picker.
+      cameraInputRef.current?.click();
+      return;
+    }
+
+    cameraStreamRef.current = stream;
+    setCameraOpen(true);
+    // Attach to the <video> after the element renders.
+    requestAnimationFrame(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      try { v.srcObject = stream; } catch {}
+      // iOS Safari needs play() on a user gesture; we're inside a click
+      // handler chain so this should succeed.
+      v.play().catch(() => {});
+    });
+  };
+
+  const capturePhoto = () => {
+    const v = videoRef.current;
+    const stream = cameraStreamRef.current;
+    if (!v || !stream) return;
+    const w = v.videoWidth || 1280;
+    const h = v.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setCameraError('Could not capture photo. Try again or upload a file.');
+      return;
+    }
+    ctx.drawImage(v, 0, 0, w, h);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setCameraError('Could not encode photo. Try again or upload a file.');
+          return;
+        }
+        if (blob.size > MAX_BYTES) {
+          // eslint-disable-next-line no-alert
+          alert('Captured photo exceeded 10MB and was discarded. Try again at lower resolution.');
+          return;
+        }
+        const fname = `camera-${Date.now()}.jpg`;
+        const file = new File([blob], fname, { type: 'image/jpeg' });
+        onFiles([file]);
+        closeCamera();
+      },
+      'image/jpeg',
+      0.9
+    );
   };
 
   const stopRecording = () => {
@@ -191,20 +298,39 @@ export default function MediaUpload({ onFiles, disabled, multiple = true }) {
         hidden
         disabled={disabled}
       />
+      {/* Mobile / no-getUserMedia fallback: opens the OS camera. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={change}
+        hidden
+        disabled={disabled}
+      />
       <button
         type="button"
         className="btn-outline full"
-        disabled={disabled}
+        disabled={disabled || cameraOpen}
         onClick={() => ref.current?.click()}
       >
         Upload your own files
+      </button>
+
+      <button
+        type="button"
+        className="btn-outline full mt-2"
+        disabled={disabled || cameraOpen || recording}
+        onClick={openCamera}
+      >
+        Take photo with camera
       </button>
 
       {recorderSupported ? (
         <button
           type="button"
           className={`btn-outline full mt-2 ${recording ? 'recording' : ''}`}
-          disabled={disabled && !recording}
+          disabled={(disabled || cameraOpen) && !recording}
           onClick={recording ? stopRecording : startRecording}
           aria-pressed={recording}
         >
@@ -212,7 +338,28 @@ export default function MediaUpload({ onFiles, disabled, multiple = true }) {
         </button>
       ) : null}
 
+      {cameraOpen ? (
+        <div className="camera-preview mt-2">
+          <video
+            ref={videoRef}
+            className="camera-video"
+            playsInline
+            muted
+            autoPlay
+          />
+          <div className="row-actions compact no-mt mt-2">
+            <button type="button" className="btn-primary small" onClick={capturePhoto}>
+              Capture
+            </button>
+            <button type="button" className="btn-ghost small" onClick={closeCamera}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {recordError ? <p className="hint small error">{recordError}</p> : null}
+      {cameraError ? <p className="hint small error">{cameraError}</p> : null}
 
       <p className="hint small">JPEG, PNG, WebP, HEIC · MP3, WAV, M4A, WebM · max 10MB each</p>
     </div>
