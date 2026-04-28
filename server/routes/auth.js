@@ -21,7 +21,7 @@ import {
   runValidators,
   validateGoogleToken,
 } from '../middleware/validate.js';
-import { asyncHandler, requireService } from '../utils/httpError.js';
+import { asyncHandler, requireService, sendError } from '../utils/httpError.js';
 import { isPinterestConfigured } from '../config/secrets.js';
 
 const router = express.Router();
@@ -38,6 +38,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const accessToken = req.body.accessToken;
     let scopes = [];
+    let info = null;
     try {
       const infoRes = await fetch(
         `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(
@@ -45,7 +46,7 @@ router.post(
         )}`
       );
       if (infoRes.ok) {
-        const info = await infoRes.json();
+        info = await infoRes.json();
         scopes = String(info?.scope || '')
           .split(/\s+/)
           .map((s) => s.trim())
@@ -55,9 +56,24 @@ router.post(
       // Best-effort only; token can still be stored and used.
     }
 
+    // Opt-in audience check: only enforced when GOOGLE_OAUTH_CLIENT_ID is set.
+    const expectedAud = (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
+    if (expectedAud) {
+      if (!info || String(info.aud || '') !== expectedAud) {
+        return sendError(
+          res,
+          400,
+          'TOKEN_AUD_MISMATCH',
+          'Access token was not issued for this application.'
+        );
+      }
+    }
+
     await updateUserSocialTokens(req.user.uid, {
       googleAccessToken: accessToken,
       googleAccessTokenScopes: scopes,
+      googleAccessTokenAud: info?.aud || null,
+      googleAccessTokenSub: info?.sub || null,
     });
     res.json({
       ok: true,

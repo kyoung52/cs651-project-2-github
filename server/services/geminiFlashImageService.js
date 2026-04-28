@@ -81,6 +81,7 @@ function extractImageDataUri(response) {
   for (const p of parts) {
     const id = p?.inlineData;
     if (!id?.data) continue;
+    if (id.mimeType && !String(id.mimeType).startsWith('image/')) continue;
     const mime = id.mimeType || 'image/png';
     const data = id.data;
     if (typeof data === 'string') {

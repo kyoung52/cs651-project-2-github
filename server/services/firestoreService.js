@@ -8,6 +8,7 @@
  */
 import { getFirestore } from '../config/firebase.js';
 import { isFirebaseAdminConfigured } from '../config/secrets.js';
+import { sanitizeProjectPayloadForStorage } from '../utils/projectPayload.js';
 
 /**
  * Run a Firestore operation safely. Logs the error server-side and returns
@@ -32,10 +33,17 @@ async function safeDb(fn, fallback, label = 'firestore') {
   }
 }
 
-export async function getMediaCache(hash) {
+function mediaCacheDocId(uid, hash) {
+  // Per-user namespacing keeps analyses (which describe private content) from
+  // leaking across users who happen to upload the same file. Falls back to a
+  // shared key when uid is absent for backward compatibility.
+  return uid ? `${uid}_${hash}` : hash;
+}
+
+export async function getMediaCache(uid, hash) {
   return safeDb(
     async (db) => {
-      const snap = await db.collection('mediaCache').doc(hash).get();
+      const snap = await db.collection('mediaCache').doc(mediaCacheDocId(uid, hash)).get();
       return snap.exists ? snap.data() : null;
     },
     null,
@@ -43,12 +51,12 @@ export async function getMediaCache(hash) {
   );
 }
 
-export async function setMediaCache(hash, data) {
+export async function setMediaCache(uid, hash, data) {
   return safeDb(
     async (db) => {
       await db
         .collection('mediaCache')
-        .doc(hash)
+        .doc(mediaCacheDocId(uid, hash))
         .set({ ...data, updatedAt: new Date().toISOString() });
       return true;
     },
@@ -175,7 +183,7 @@ export async function setProjectPublished(uid, projectId, published) {
             name: data.name || null,
             createdAt: data.createdAt || null,
             publishedAt,
-            payload: data.payload || {},
+            payload: sanitizeProjectPayloadForStorage(data.payload || {}),
           },
           { merge: true }
         );
@@ -242,19 +250,25 @@ const OAUTH_TTL_MS = 10 * 60 * 1000;
 export async function setOAuthState(stateId, uid) {
   const payload = { uid, createdAt: Date.now() };
 
+  // Periodic prune so the in-memory fallback stays bounded.
+  for (const [k, v] of memoryOAuthStates) {
+    if (Date.now() - v.createdAt > OAUTH_TTL_MS) memoryOAuthStates.delete(k);
+  }
+
   if (!isFirebaseAdminConfigured()) {
     memoryOAuthStates.set(stateId, payload);
     return true;
   }
 
-  return safeDb(
-    async (db) => {
-      await db.collection('oauthStates').doc(stateId).set(payload);
-      return true;
-    },
-    (memoryOAuthStates.set(stateId, payload), true),
-    'firestore:setOAuthState'
-  );
+  try {
+    const db = getFirestore();
+    await db.collection('oauthStates').doc(stateId).set(payload);
+    return true;
+  } catch (err) {
+    console.warn('[firestore:setOAuthState]', err?.message || err);
+    memoryOAuthStates.set(stateId, payload);
+    return true;
+  }
 }
 
 export async function getOAuthState(stateId) {

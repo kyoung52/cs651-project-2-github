@@ -20,6 +20,7 @@ import {
   validateProcessUrls,
   validateGooglePhotosSelection,
   validateMediaRefine,
+  assertSafePublicUrl,
 } from '../middleware/validate.js';
 import {
   ALLOWED_IMAGE_MIMES,
@@ -79,6 +80,54 @@ function tryJsonParse(value) {
   } catch {
     return null;
   }
+}
+
+const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Fetch a remote URL and stream the body, bailing out if it exceeds maxBytes
+ * or doesn't return within FETCH_TIMEOUT_MS. Throws an Error tagged with one
+ * of: 'FETCH_FAILED' | 'NOT_OK' | 'TOO_LARGE' | 'NO_BODY'.
+ */
+async function safeFetchBytes(url, { headers, maxBytes = MAX_UPLOAD_BYTES } = {}) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const e = new Error(err?.message || 'fetch failed'); e.code = 'FETCH_FAILED'; throw e;
+  }
+  if (!response.ok) {
+    const e = new Error(`status ${response.status}`); e.code = 'NOT_OK';
+    e.status = response.status; e.response = response; throw e;
+  }
+  const len = Number(response.headers.get('content-length'));
+  if (Number.isFinite(len) && len > maxBytes) {
+    try { response.body?.cancel(); } catch {}
+    const e = new Error('content-length over limit'); e.code = 'TOO_LARGE'; throw e;
+  }
+  if (!response.body) { const e = new Error('no body'); e.code = 'NO_BODY'; throw e; }
+  const chunks = []; let total = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { reader.cancel(); } catch {}
+        const e = new Error('body over limit'); e.code = 'TOO_LARGE'; throw e;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  return { buffer: Buffer.concat(chunks.map((c) => Buffer.from(c))), response };
 }
 
 /**
@@ -150,16 +199,16 @@ router.post(
       const mime = file.mimetype;
       const hash = hashContent(buf);
 
-      const cached = await getMediaCache(hash);
+      const cached = await getMediaCache(req.user?.uid, hash);
       let analysis = cached?.analysis;
 
       if (!analysis) {
         if (ALLOWED_IMAGE_MIMES.has(mime)) {
           analysis = await analyzeImage(buf, mime);
-          await setMediaCache(hash, { type: 'image', mimeType: mime, analysis });
+          await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: mime, analysis });
         } else if (ALLOWED_AUDIO_MIMES.has(mime)) {
           analysis = await analyzeAudio(buf, mime);
-          await setMediaCache(hash, { type: 'audio', mimeType: mime, analysis });
+          await setMediaCache(req.user?.uid, hash, { type: 'audio', mimeType: mime, analysis });
         } else {
           continue;
         }
@@ -256,33 +305,34 @@ router.post(
     const chatContext = typeof req.body.chatContext === 'string' ? req.body.chatContext : '';
     const regenSeed = crypto.randomUUID();
 
-    let response;
+    try { await assertSafePublicUrl(url); }
+    catch { return sendError(res, 400, 'FETCH_BLOCKED', 'Refusing to fetch from a non-public address.'); }
+    let arrayBuf, response;
     try {
-      response = await fetch(url, { method: 'GET', redirect: 'follow' });
+      ({ buffer: arrayBuf, response } = await safeFetchBytes(url));
     } catch (err) {
+      if (err.code === 'TOO_LARGE') return sendError(res, 400, 'TOO_LARGE', 'Image is too large (max 10MB).');
       console.warn('[media:process-url] fetch failed:', err.message);
-      return sendError(res, 400, 'FETCH_FAILED', 'Unable to fetch the provided URL.');
-    }
-    if (!response.ok) {
-      return sendError(res, 400, 'FETCH_FAILED', 'The remote URL did not respond with an image.');
+      return sendError(res, 400, 'FETCH_FAILED', err.code === 'NOT_OK'
+        ? 'The remote URL did not respond with an image.'
+        : 'Unable to fetch the provided URL.');
     }
 
-    const rawType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    const ctHeader = response.headers.get('content-type');
+    if (!ctHeader) {
+      return sendError(res, 400, 'NOT_IMAGE', 'URL did not return a content type.');
+    }
+    const rawType = ctHeader.split(';')[0].trim();
     if (!ALLOWED_IMAGE_MIMES.has(rawType)) {
       return sendError(res, 400, 'NOT_IMAGE', 'URL must point to a JPEG, PNG, or WebP image.');
     }
 
-    const arrayBuf = Buffer.from(await response.arrayBuffer());
-    if (arrayBuf.length > MAX_UPLOAD_BYTES) {
-      return sendError(res, 400, 'TOO_LARGE', 'Image is too large (max 10MB).');
-    }
-
     const hash = hashContent(arrayBuf);
-    const cached = await getMediaCache(hash);
+    const cached = await getMediaCache(req.user?.uid, hash);
     let analysis = cached?.analysis;
     if (!analysis) {
       analysis = await analyzeImage(arrayBuf, rawType);
-      await setMediaCache(hash, { type: 'image', mimeType: rawType, analysis });
+      await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: rawType, analysis });
     }
 
     const concept = await generateRoomConcept({
@@ -363,33 +413,34 @@ router.post(
     for (const u of urls.slice(0, 6)) {
       const url = String(u).slice(0, 2048);
 
-      let response;
+      try { await assertSafePublicUrl(url); }
+      catch { return sendError(res, 400, 'FETCH_BLOCKED', 'Refusing to fetch from a non-public address.'); }
+      let arrayBuf, response;
       try {
-        response = await fetch(url, { method: 'GET', redirect: 'follow' });
+        ({ buffer: arrayBuf, response } = await safeFetchBytes(url));
       } catch (err) {
+        if (err.code === 'TOO_LARGE') return sendError(res, 400, 'TOO_LARGE', 'One of the images is too large (max 10MB).');
         console.warn('[media:process-urls] fetch failed:', err.message);
-        return sendError(res, 400, 'FETCH_FAILED', 'Unable to fetch one of the provided URLs.');
-      }
-      if (!response.ok) {
-        return sendError(res, 400, 'FETCH_FAILED', 'One of the remote URLs did not respond with an image.');
+        return sendError(res, 400, 'FETCH_FAILED', err.code === 'NOT_OK'
+          ? 'One of the remote URLs did not respond with an image.'
+          : 'Unable to fetch one of the provided URLs.');
       }
 
-      const rawType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+      const ctHeader = response.headers.get('content-type');
+      if (!ctHeader) {
+        return sendError(res, 400, 'NOT_IMAGE', 'A URL did not return a content type.');
+      }
+      const rawType = ctHeader.split(';')[0].trim();
       if (!ALLOWED_IMAGE_MIMES.has(rawType)) {
         return sendError(res, 400, 'NOT_IMAGE', 'All URLs must point to JPEG, PNG, or WebP images.');
       }
 
-      const arrayBuf = Buffer.from(await response.arrayBuffer());
-      if (arrayBuf.length > MAX_UPLOAD_BYTES) {
-        return sendError(res, 400, 'TOO_LARGE', 'One of the images is too large (max 10MB).');
-      }
-
       const hash = hashContent(arrayBuf);
-      const cached = await getMediaCache(hash);
+      const cached = await getMediaCache(req.user?.uid, hash);
       let analysis = cached?.analysis;
       if (!analysis) {
         analysis = await analyzeImage(arrayBuf, rawType);
-        await setMediaCache(hash, { type: 'image', mimeType: rawType, analysis });
+        await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: rawType, analysis });
       }
       imageAnalyses.push(analysis);
       if (referenceImages.length < 3) referenceImages.push({ buffer: arrayBuf, mimeType: rawType });
@@ -462,6 +513,23 @@ function toGoogleDownloadUrl(baseUrl) {
   return `${root}=d`;
 }
 
+// Strict host allowlist for Google Photos download URLs. Without this the
+// caller could supply any public https URL and have the server send the
+// user's Google OAuth bearer token to it.
+const GOOGLE_PHOTOS_HOST_ALLOWLIST = [
+  /^lh[3-9]\.googleusercontent\.com$/i,
+  /^([a-z0-9-]+\.)?googleusercontent\.com$/i,
+  /^photoslibrary\.googleapis\.com$/i,
+];
+function isGooglePhotosHost(urlString) {
+  try {
+    const h = new URL(urlString).hostname;
+    return GOOGLE_PHOTOS_HOST_ALLOWLIST.some((r) => r.test(h));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * POST /api/media/process-google-photos — process selected Google Photos media items.
  * Uses the user's stored Google OAuth access token to download bytes.
@@ -491,44 +559,43 @@ router.post(
     for (const it of items.slice(0, 6)) {
       const downloadUrl = toGoogleDownloadUrl(it?.baseUrl);
       if (!downloadUrl) continue;
+      if (!isGooglePhotosHost(downloadUrl)) {
+        return sendError(
+          res,
+          400,
+          'INVALID_PHOTO_HOST',
+          'Selected items must come from Google Photos.'
+        );
+      }
+      try { await assertSafePublicUrl(downloadUrl); }
+      catch { return sendError(res, 400, 'FETCH_BLOCKED', 'Refusing to fetch from a non-public address.'); }
 
-      let response;
+      let arrayBuf, response;
       try {
-        response = await fetch(downloadUrl, {
-          method: 'GET',
-          redirect: 'follow',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
+        ({ buffer: arrayBuf, response } = await safeFetchBytes(downloadUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }));
       } catch (err) {
+        if (err.code === 'TOO_LARGE') return sendError(res, 400, 'TOO_LARGE', 'One of the selected photos is too large (max 10MB).');
         console.warn('[media:process-google-photos] fetch failed:', err.message);
         return sendError(res, 400, 'FETCH_FAILED', 'Unable to fetch one of the selected Google Photos items.');
       }
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        console.warn('[media:process-google-photos] fetch status:', response.status, body.slice(0, 200));
-        return sendError(res, 400, 'FETCH_FAILED', 'Unable to fetch one of the selected Google Photos items.');
-      }
 
-      const rawType = (response.headers.get('content-type') || it?.mimeType || 'image/jpeg')
-        .split(';')[0]
-        .trim();
+      const ctHeader = response.headers.get('content-type');
+      if (!ctHeader) {
+        return sendError(res, 400, 'NOT_IMAGE', 'A selected photo did not return a content type.');
+      }
+      const rawType = ctHeader.split(';')[0].trim();
       if (!ALLOWED_IMAGE_MIMES.has(rawType)) {
         return sendError(res, 400, 'NOT_IMAGE', 'Selected items must be JPEG, PNG, or WebP images.');
       }
 
-      const arrayBuf = Buffer.from(await response.arrayBuffer());
-      if (arrayBuf.length > MAX_UPLOAD_BYTES) {
-        return sendError(res, 400, 'TOO_LARGE', 'One of the selected photos is too large (max 10MB).');
-      }
-
       const hash = hashContent(arrayBuf);
-      const cached = await getMediaCache(hash);
+      const cached = await getMediaCache(req.user?.uid, hash);
       let analysis = cached?.analysis;
       if (!analysis) {
         analysis = await analyzeImage(arrayBuf, rawType);
-        await setMediaCache(hash, { type: 'image', mimeType: rawType, analysis });
+        await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: rawType, analysis });
       }
       imageAnalyses.push(analysis);
       if (referenceImages.length < 3) referenceImages.push({ buffer: arrayBuf, mimeType: rawType });
@@ -602,22 +669,41 @@ router.post(
  * POST /api/media/refine — regenerate concept + rerender hero image.
  *
  * Accepts:
- * - previousConcept (JSON)
+ * - previousConcept (JSON; client must strip data: URIs to stay under the 1MB
+ *   multer field-size limit)
  * - feedback (string)
  * - optional chatContext (string)
  * - optional regen (object) from prior /process response
- * - optional new uploads (images/audio) to influence the rerender
+ * - optional `files` uploads (images/audio) — analyzed and merged
+ * - optional single `previousRender` file — the prior generated image, used
+ *   only as a visual reference for the new render (NOT analyzed, so we don't
+ *   pay a Gemini call for our own output and we don't pollute regen analyses)
  */
+const refineUpload = multer({
+  storage,
+  // fieldSize default is 1MB. The client now strips featuredImage data URIs
+  // from previousConcept before stringifying, but unusually long blueprints +
+  // analyses can still grow. Keep it generous.
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 12, fieldSize: MAX_UPLOAD_BYTES },
+  fileFilter,
+});
+
 router.post(
   '/refine',
   verifyFirebaseToken,
   requireService(isGeminiConfigured, 'AI refinement is not configured on this server.'),
-  upload.array('files', 10),
+  refineUpload.fields([
+    { name: 'files', maxCount: 10 },
+    { name: 'previousRender', maxCount: 1 },
+  ]),
   sanitizeBodyStrings,
   ...validateMediaRefine,
   runValidators,
   asyncHandler(async (req, res) => {
-    const previousConcept = req.body.previousConcept;
+    const previousConcept =
+      typeof req.body.previousConcept === 'string'
+        ? tryJsonParse(req.body.previousConcept)
+        : req.body.previousConcept;
     const feedback = String(req.body.feedback || '').trim();
     const regen = typeof req.body.regen === 'string' ? tryJsonParse(req.body.regen) : req.body.regen;
     const chatContext = typeof req.body.chatContext === 'string' ? req.body.chatContext : '';
@@ -635,26 +721,39 @@ router.post(
         ? regen.conceptGenInput.useRealisticFurniture
         : true;
 
-    const files = Array.isArray(req.files) ? req.files : [];
+    // upload.fields() returns { files: [], previousRender: [] }
+    const files = Array.isArray(req.files?.files) ? req.files.files : [];
+    const previousRenderFile = Array.isArray(req.files?.previousRender)
+      ? req.files.previousRender[0]
+      : null;
     const addedImageAnalyses = [];
     const addedAudioAnalyses = [];
     const referenceImages = [];
+
+    // Visual continuity: prior generated image becomes the FIRST reference,
+    // skipping analysis (it's our own output — no need to pay Vertex again).
+    if (previousRenderFile && ALLOWED_IMAGE_MIMES.has(previousRenderFile.mimetype)) {
+      referenceImages.push({
+        buffer: previousRenderFile.buffer,
+        mimeType: previousRenderFile.mimetype,
+      });
+    }
 
     for (const file of files) {
       const buf = file.buffer;
       const mime = file.mimetype;
       const hash = hashContent(buf);
 
-      const cached = await getMediaCache(hash);
+      const cached = await getMediaCache(req.user?.uid, hash);
       let analysis = cached?.analysis;
 
       if (!analysis) {
         if (ALLOWED_IMAGE_MIMES.has(mime)) {
           analysis = await analyzeImage(buf, mime);
-          await setMediaCache(hash, { type: 'image', mimeType: mime, analysis });
+          await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: mime, analysis });
         } else if (ALLOWED_AUDIO_MIMES.has(mime)) {
           analysis = await analyzeAudio(buf, mime);
-          await setMediaCache(hash, { type: 'audio', mimeType: mime, analysis });
+          await setMediaCache(req.user?.uid, hash, { type: 'audio', mimeType: mime, analysis });
         } else {
           continue;
         }

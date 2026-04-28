@@ -27,8 +27,10 @@ import {
   sendError,
   requireService,
 } from '../utils/httpError.js';
-import { isGeminiConfigured } from '../config/secrets.js';
+import { isGeminiConfigured, isVertexFlashImagePreviewEnabled } from '../config/secrets.js';
 import { sanitizeProjectPayloadForStorage } from '../utils/projectPayload.js';
+import { generateRoomSceneDataUri } from '../services/geminiFlashImageService.js';
+import { generationLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -105,6 +107,37 @@ router.delete(
       );
     }
     res.json({ ok: true });
+  })
+);
+
+/**
+ * Re-render the hero image for a saved project. Saved payloads have their
+ * `data:` featuredImage stripped (Firestore size limits), so the dashboard
+ * needs a way to regenerate it from the saved `regen` context.
+ */
+router.post(
+  '/projects/:id/render',
+  verifyFirebaseToken,
+  requireService(isVertexFlashImagePreviewEnabled, 'Image preview is not configured.'),
+  generationLimiter,
+  ...validateProjectId,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const project = await getProject(req.user.uid, req.params.id);
+    if (!project) return sendError(res, 404, 'NOT_FOUND', 'Project not found.');
+    const concept = project?.payload?.concept || null;
+    const regen = project?.payload?.regen || null;
+    const chatContext = regen?.conceptGenInput?.chatContext || '';
+    const audioAnalyses = regen?.conceptGenInput?.audioAnalyses || [];
+    const uri = await generateRoomSceneDataUri({
+      concept,
+      chatContext,
+      referenceImages: [],
+      audioAnalyses,
+      regenSeed: regen?.regenSeed || '',
+    });
+    if (!uri) return sendError(res, 502, 'RENDER_FAILED', 'Unable to render preview right now.');
+    res.json({ image: uri });
   })
 );
 

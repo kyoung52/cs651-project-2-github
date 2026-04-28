@@ -13,19 +13,23 @@ export async function listMyVideos(accessToken, maxResults = 25) {
 
   const yt = google.youtube({ version: 'v3', auth: oauth2 });
 
-  const res = await yt.search.list({
+  // Use the channel's uploads playlist instead of search.list?forMine=true,
+  // which historically required the broader 'youtube' scope. playlistItems +
+  // channels.list?mine=true work under youtube.readonly.
+  const ch = await yt.channels.list({ part: ['contentDetails'], mine: true });
+  const uploadsId = ch.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploadsId) return [];
+  const res = await yt.playlistItems.list({
     part: ['snippet'],
-    forMine: true,
-    type: ['video'],
+    playlistId: uploadsId,
     maxResults: Math.min(maxResults, 50),
   });
 
-  const items = res.data.items || [];
-  return items.map((item) => ({
-    videoId: item.id?.videoId,
-    title: item.snippet?.title || '',
-    description: item.snippet?.description || '',
-    thumbnails: item.snippet?.thumbnails || {},
+  return (res.data.items || []).map((it) => ({
+    videoId: it.snippet?.resourceId?.videoId,
+    title: it.snippet?.title || '',
+    description: it.snippet?.description || '',
+    thumbnails: it.snippet?.thumbnails || {},
   }));
 }
 

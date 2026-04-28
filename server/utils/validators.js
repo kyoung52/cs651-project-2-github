@@ -26,12 +26,20 @@ export const ALLOWED_IMAGE_MIMES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/heic',
+  'image/heif',
 ]);
 export const ALLOWED_AUDIO_MIMES = new Set([
   'audio/mpeg',
   'audio/wav',
   'audio/x-wav',
   'audio/mp3',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/aac',
+  // Browser MediaRecorder outputs: Chrome → webm, Firefox → ogg, Safari → mp4 (already covered).
+  'audio/webm',
+  'audio/ogg',
 ]);
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB

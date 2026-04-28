@@ -59,7 +59,7 @@ export async function searchSimilarImages(query, limit = 8) {
     extra: { q: String(query).slice(0, 200) },
   });
 
-  const items = res.data.items || [];
+  const items = (res.data.items || []).filter((it) => /^https:\/\//i.test(String(it?.link || '')));
   const n = items.length || 1;
 
   return items.map((item, index) => {

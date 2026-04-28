@@ -6,6 +6,7 @@
  * because we must block private/link-local addresses before fetching.
  */
 import { body, param, query, validationResult } from 'express-validator';
+import dns from 'node:dns/promises';
 import { sendError } from '../utils/httpError.js';
 
 /**
@@ -51,6 +52,53 @@ export function isSafePublicUrl(value) {
     return true;
   } catch {
     return false;
+  }
+}
+
+// DNS-resolved follow-up to isSafePublicUrl: rejects hostnames that resolve
+// into private/loopback/link-local ranges (e.g. DNS rebinding, Cloud Run
+// metadata server). Throws an Error with .code='BLOCKED_HOST' on rejection.
+function ipv4InCidr(ip, cidr) {
+  const [base, bitsStr] = cidr.split('/');
+  const bits = Number(bitsStr);
+  const toInt = (a) => a.split('.').reduce((n, p) => ((n << 8) | Number(p)) >>> 0, 0);
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (toInt(ip) & mask) === (toInt(base) & mask);
+}
+const BLOCKED_V4_CIDRS = [
+  '10.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
+  '192.168.0.0/16', '100.64.0.0/10', '0.0.0.0/8', '224.0.0.0/4', '240.0.0.0/4',
+];
+function isPrivateV4(ip) { return BLOCKED_V4_CIDRS.some((c) => ipv4InCidr(ip, c)); }
+function isPrivateV6(ip) {
+  const lc = ip.toLowerCase();
+  return (
+    lc === '::1' ||
+    lc.startsWith('fc') || lc.startsWith('fd') || lc.startsWith('fe80') ||
+    lc.startsWith('::ffff:127.') || lc.startsWith('::ffff:10.') ||
+    lc.startsWith('::ffff:169.254.') || lc.startsWith('::ffff:192.168.') ||
+    lc.startsWith('::ffff:172.')
+  );
+}
+
+export async function assertSafePublicUrl(value) {
+  if (!isSafePublicUrl(value)) {
+    const e = new Error('blocked host'); e.code = 'BLOCKED_HOST'; throw e;
+  }
+  const host = new URL(value).hostname;
+  let answers = [];
+  try {
+    answers = await dns.lookup(host, { all: true, verbatim: true });
+  } catch {
+    const e = new Error('dns lookup failed'); e.code = 'BLOCKED_HOST'; throw e;
+  }
+  for (const a of answers) {
+    if (a.family === 4 && isPrivateV4(a.address)) {
+      const e = new Error(`private ipv4 ${a.address}`); e.code = 'BLOCKED_HOST'; throw e;
+    }
+    if (a.family === 6 && isPrivateV6(a.address)) {
+      const e = new Error(`private ipv6 ${a.address}`); e.code = 'BLOCKED_HOST'; throw e;
+    }
   }
 }
 
@@ -125,14 +173,15 @@ export const validateRefine = [
 ];
 
 export const validateMediaRefine = [
-  body('previousConcept').isObject().withMessage('previousConcept is required'),
+  // previousConcept and regen arrive as JSON strings over multipart/form-data
+  // and are parsed in the handler. Only require previousConcept's presence here.
+  body('previousConcept').exists({ checkNull: true }).withMessage('previousConcept is required'),
   body('feedback')
     .isString()
     .withMessage('feedback is required')
     .isLength({ min: 1, max: 2000 })
     .withMessage('feedback must be 1–2000 characters'),
   body('chatContext').optional().isString().isLength({ max: 8000 }),
-  body('regen').optional().isObject().withMessage('regen must be an object'),
 ];
 
 export const validateSaveProject = [

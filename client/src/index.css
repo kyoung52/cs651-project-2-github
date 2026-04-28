@@ -778,6 +778,22 @@ code {
   margin-top: 0.75rem;
 }
 
+.upload-zone .hint.error {
+  color: var(--danger);
+}
+
+.btn-outline.recording {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+  animation: roomify-rec-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes roomify-rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--danger-soft); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
+}
+
 .audio-list ul {
   margin: 0.25rem 0 0;
   padding-left: 1.1rem;

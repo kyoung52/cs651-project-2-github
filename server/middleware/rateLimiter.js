@@ -17,3 +17,13 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many uploads', code: 'RATE_LIMIT_UPLOAD' },
 });
+
+/** Per-user limiter for paid generation endpoints (e.g. Vertex image renders). */
+export const generationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.uid || req.ip,
+  message: { error: 'Too many generations — please wait a moment.', code: 'RATE_LIMIT_GENERATION' },
+});

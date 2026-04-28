@@ -20,7 +20,13 @@ export default function SimilarInspiration({ results, title = 'Similar inspirati
         {results.map((r, i) => (
           <li key={i} className="inspiration-item">
             <a href={r.link} target="_blank" rel="noopener noreferrer" className="inspiration-thumb-link">
-              <img src={r.link} alt="" className="inspiration-thumb" loading="lazy" />
+              <img
+                src={r.link}
+                alt=""
+                className="inspiration-thumb"
+                loading="lazy"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
             </a>
             <div className="inspiration-meta">
               <span className="inspiration-title">{r.title || r.displayLink || 'Result'}</span>

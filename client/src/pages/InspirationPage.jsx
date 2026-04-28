@@ -148,7 +148,37 @@ export default function InspirationPage() {
         {!googleConnected ? (
           <EmptyState
             title="Connect Google Photos"
-            body="Click below to connect your Google account and authorize Google Photos read access."
+            description="Click below to connect your Google account and authorize Google Photos read access."
+            action={
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const ok = await connectGoogleMedia();
+                    if (ok) {
+                      setGoogleConnected(true);
+                      const { data } = await api.get('/api/social/google-photos/albums');
+                      setAlbums(Array.isArray(data?.albums) ? data.albums : []);
+                    } else {
+                      toast.push({
+                        variant: 'warn',
+                        title: 'Google',
+                        message: 'Permission was not granted. Try again and allow Photos access.',
+                      });
+                    }
+                  } catch (err) {
+                    toast.push({ variant: 'error', title: 'Google', message: err.message });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? 'Connecting…' : 'Connect Google Photos'}
+              </button>
+            }
           />
         ) : (
           <div className="inspo-grid">

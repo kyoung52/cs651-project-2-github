@@ -51,13 +51,17 @@ export default function DashboardPage() {
   const [refineText, setRefineText] = useState('');
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const [rerenderingHero, setRerenderingHero] = useState(false);
 
   // Restore workspace state when returning to the Dashboard route.
   useEffect(() => {
     if (!dashboardState) return;
     setMessages(dashboardState.messages || [WELCOME_MESSAGE]);
     setChatContext(dashboardState.chatContext || '');
-    setFiles(dashboardState.files || []);
+    // Files are not restored across navigation: File objects can lose their
+    // underlying blob (notably on iOS Safari), and refine still works using
+    // the cached server-side analyses in `regen.conceptGenInput.imageAnalyses`.
+    setFiles([]);
     setAudioNames(dashboardState.audioNames || []);
     setRealistic(dashboardState.realistic ?? true);
     setConcept(dashboardState.concept || null);
@@ -68,16 +72,34 @@ export default function DashboardPage() {
     setRegen(dashboardState.regen || null);
     setLoading(false);
     setGenerationProgress(0);
+
+    // Saved-project hero re-render: the original data URI was stripped at save
+    // time, so when Continue lands here with no featuredImage, fire a render
+    // and swap it in. Failures (Vertex disabled, rate-limited) are ignored.
+    const projectId = dashboardState.loadedProjectId;
+    const savedConcept = dashboardState.concept;
+    if (projectId && savedConcept && !savedConcept.featuredImage) {
+      setRerenderingHero(true);
+      api
+        .post(`/api/gemini/projects/${encodeURIComponent(projectId)}/render`)
+        .then(({ data }) => {
+          if (data?.image) {
+            setConcept((c) => (c ? { ...c, featuredImage: data.image } : c));
+          }
+        })
+        .catch(() => {})
+        .finally(() => setRerenderingHero(false));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist the workspace state when navigating away.
   useEffect(() => {
     return () => {
-      setDashboardState({
+      setDashboardState((prev) => ({
         messages,
         chatContext,
-        files,
+        files: [], // see restore effect — File objects are not safe to persist
         audioNames,
         realistic,
         concept,
@@ -86,7 +108,10 @@ export default function DashboardPage() {
         analysisKeywords,
         tab,
         regen,
-      });
+        // Preserve loadedProjectId so a hero re-render that didn't complete
+        // before navigation can retry on remount (skipped once concept has an image).
+        loadedProjectId: prev?.loadedProjectId || null,
+      }));
     };
   }, [
     setDashboardState,
@@ -247,7 +272,26 @@ export default function DashboardPage() {
       const fd = new FormData();
       // Allow refining with any current uploads (and any newly added files).
       files.forEach((f) => fd.append('files', f));
-      fd.append('previousConcept', JSON.stringify(concept || {}));
+
+      // Strip featuredImage before stringifying. A 1-2 MB data: URI inside a
+      // multipart text field would blow past multer's per-field size limit
+      // and silently break refines. Send the prior render separately as a
+      // file part so the server uses it as a visual reference for continuity.
+      const conceptForJson = concept ? { ...concept, featuredImage: null } : {};
+      fd.append('previousConcept', JSON.stringify(conceptForJson));
+      const prior = concept?.featuredImage;
+      if (typeof prior === 'string' && prior.startsWith('data:image/')) {
+        try {
+          const blob = await (await fetch(prior)).blob();
+          if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
+            fd.append('previousRender', blob, 'previous-render.png');
+          }
+        } catch (e) {
+          // Non-fatal — refine still works without the visual reference.
+          console.warn('[refine] could not attach previous render:', e?.message || e);
+        }
+      }
+
       fd.append('feedback', clean);
       fd.append('chatContext', chatContext);
       if (regen) fd.append('regen', JSON.stringify(regen));
@@ -296,7 +340,12 @@ export default function DashboardPage() {
   const centerBody = useMemo(() => {
     if (loading || concept) {
       return tab === 'renders' ? (
-        <RoomConcept concept={concept} loading={loading} generationProgress={generationProgress} />
+        <RoomConcept
+          concept={concept}
+          loading={loading}
+          generationProgress={generationProgress}
+          rerenderingHero={rerenderingHero}
+        />
       ) : (
         <BlueprintView notes={concept?.blueprintNotes} blueprint={concept?.blueprint} />
       );
@@ -325,7 +374,7 @@ export default function DashboardPage() {
         description={`${files.length} file${files.length === 1 ? '' : 's'} queued. Click Generate to create your concept.`}
       />
     );
-  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length, generationProgress]);
+  }, [loading, concept, tab, isGeminiConfigured, configLoading, files.length, generationProgress, rerenderingHero]);
 
   const rightBody = useMemo(() => {
     if (loading) {

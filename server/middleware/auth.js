@@ -4,7 +4,14 @@
  */
 import { initFirebase, admin } from '../config/firebase.js';
 
-const DEV_SKIP_AUTH = process.env.DEV_SKIP_AUTH === 'true';
+const DEV_SKIP_AUTH =
+  process.env.DEV_SKIP_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+
+if (process.env.DEV_SKIP_AUTH === 'true' && process.env.NODE_ENV === 'production') {
+  console.error('[auth] Refusing to honor DEV_SKIP_AUTH in production. Auth is enforced.');
+} else if (DEV_SKIP_AUTH) {
+  console.warn('[auth] DEV_SKIP_AUTH=true — all requests run as dev-user. Do not deploy.');
+}
 
 export async function verifyFirebaseToken(req, res, next) {
   if (DEV_SKIP_AUTH) {

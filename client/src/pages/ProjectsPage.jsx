@@ -81,6 +81,8 @@ export default function ProjectsPage() {
       analysisKeywords: concept?.analysisKeywords || [],
       tab: 'renders',
       regen,
+      // Hero data URIs are stripped at save; tell the dashboard to re-render.
+      loadedProjectId: project?.id || null,
     });
 
     setDetailsOpen(false);

@@ -8,9 +8,11 @@ import express from 'express';
 import { verifyFirebaseToken } from '../middleware/auth.js';
 import { sanitizeBodyStrings } from '../middleware/sanitize.js';
 import { runValidators } from '../middleware/validate.js';
-import { asyncHandler, sendError } from '../utils/httpError.js';
+import { asyncHandler, requireService, sendError } from '../utils/httpError.js';
 import { getPublishedProject, listPublishedProjects } from '../services/firestoreService.js';
 import { generateRoomSceneDataUri } from '../services/geminiFlashImageService.js';
+import { isVertexFlashImagePreviewEnabled } from '../config/secrets.js';
+import { generationLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -50,6 +52,8 @@ router.get(
 router.post(
   '/render',
   verifyFirebaseToken,
+  requireService(isVertexFlashImagePreviewEnabled, 'Image preview is not configured.'),
+  generationLimiter,
   sanitizeBodyStrings,
   runValidators,
   asyncHandler(async (req, res) => {

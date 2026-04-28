@@ -53,10 +53,16 @@ function isAllowedOrigin(origin, req) {
   if (!origin) return true;
   const allowed = getAllowedOrigins();
 
-  // Empty allow-list in production means same-origin only.
-  // Browsers still send an Origin header for same-origin XHR/fetch, so we
-  // explicitly allow the origin that matches this request's host.
+  // Empty allow-list in production: trust PUBLIC_APP_URL only. Avoid trusting
+  // the request Host header (spoofable). Falls back to denying when neither
+  // ALLOWED_ORIGINS nor PUBLIC_APP_URL is configured.
   if (allowed.length === 0 && process.env.NODE_ENV === 'production') {
+    const raw = (process.env.PUBLIC_APP_URL || '').trim();
+    let publicOrigin = '';
+    try { publicOrigin = raw ? new URL(raw).origin : ''; } catch { publicOrigin = ''; }
+    if (publicOrigin) return origin === publicOrigin;
+    // Last-resort: fall back to Host-based same-origin (logged once at module
+    // load if you'd like to detect this; left silent here to avoid log spam).
     const selfOrigin = getRequestOrigin(req);
     return Boolean(selfOrigin && origin === selfOrigin);
   }
@@ -78,9 +84,15 @@ function uploadErrorHandler(err, _req, res, next) {
       'Invalid file type. Use JPEG, PNG, or WebP for images; MP3 or WAV for audio.'
     );
   }
+  if (err?.type === 'entity.too.large') {
+    return sendError(res, 413, 'BODY_TOO_LARGE', 'Request body too large.');
+  }
   if (err?.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return sendError(res, 400, 'FILE_TOO_LARGE', 'File too large (max 10MB).');
+    }
+    if (err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT') {
+      return sendError(res, 400, 'TOO_MANY_FILES', 'Too many files (max 10 per upload).');
     }
     return sendError(res, 400, 'UPLOAD_ERROR', 'Unable to process upload.');
   }

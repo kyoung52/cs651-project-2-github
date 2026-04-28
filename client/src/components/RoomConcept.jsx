@@ -25,28 +25,16 @@ async function downloadImage(src, filenameBase) {
     return;
   }
 
-  // Remote URL — try fetch->blob to force download
-  try {
-    const res = await fetch(src, { method: 'GET', mode: 'cors' });
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch {
-    // Fallback: open in new tab if CORS blocks fetch
-    window.open(src, '_blank', 'noopener,noreferrer');
-  }
+  // Remote URL — third-party hosts almost never send CORS headers for image
+  // requests, so fetch->blob silently fails and falls back to a tab. Skip the
+  // attempt and open in a new tab honestly.
+  window.open(src, '_blank', 'noopener,noreferrer');
 }
 
 /**
  * Center column: featured image + concept text + keyword chips.
  */
-export default function RoomConcept({ concept, loading, generationProgress = 0 }) {
+export default function RoomConcept({ concept, loading, generationProgress = 0, rerenderingHero = false }) {
   if (loading) {
     return (
       <div className="panel main-panel center-placeholder">
@@ -75,11 +63,16 @@ export default function RoomConcept({ concept, loading, generationProgress = 0 }
         <span className="badge">{concept.styleLabel || 'Concept'}</span>
         <h2>{concept.title || 'Your project'}</h2>
       </div>
-      {img && (
+      {img ? (
         <div className="concept-image-wrap">
           <img src={img} alt={concept.title || 'Room concept'} className="concept-image" />
         </div>
-      )}
+      ) : rerenderingHero ? (
+        <div className="concept-image-wrap center-grid">
+          <div className="spinner" aria-label="Re-rendering preview" />
+          <p className="hint small">Re-rendering preview…</p>
+        </div>
+      ) : null}
       {img ? (
         <div className="row-actions compact no-mt mb-2">
           <button
