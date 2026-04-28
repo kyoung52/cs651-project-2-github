@@ -10,8 +10,6 @@ Express hosts the built SPA on `/` and the JSON API under `/api/*`.
 
 ## Highlights
 
-- No Vite: minimal `esbuild` pipeline bakes the React SPA directly into
-  `server/public/`.
 - Graceful degradation: missing Gemini / Pinterest / Search keys show
   friendly "Not configured" notices instead of 500s.
 - Unified `{ error, code }` response shape on every API failure.
