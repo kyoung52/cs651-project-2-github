@@ -2,6 +2,7 @@
  * Pinterest API v5 helpers (OAuth token required per user).
  * Docs: https://developers.pinterest.com/
  */
+import { logExternalApiCall } from '../utils/logger.js';
 
 const BASE = 'https://api.pinterest.com/v5';
 
@@ -18,7 +19,6 @@ export async function listBoards(accessToken) {
   });
   if (!res.ok) {
     const err = await res.text();
-    const { logExternalApiCall } = await import('../utils/logger.js');
     logExternalApiCall({
       service: 'pinterest',
       operation: 'list_boards',
@@ -32,7 +32,6 @@ export async function listBoards(accessToken) {
     throw new Error(`Pinterest boards: ${res.status} ${err}`);
   }
   const data = await res.json();
-  const { logExternalApiCall } = await import('../utils/logger.js');
   logExternalApiCall({
     service: 'pinterest',
     operation: 'list_boards',
@@ -60,7 +59,6 @@ export async function listPins(accessToken, boardId) {
   });
   if (!res.ok) {
     const err = await res.text();
-    const { logExternalApiCall } = await import('../utils/logger.js');
     logExternalApiCall({
       service: 'pinterest',
       operation: 'list_pins',
@@ -75,7 +73,6 @@ export async function listPins(accessToken, boardId) {
     throw new Error(`Pinterest pins: ${res.status} ${err}`);
   }
   const data = await res.json();
-  const { logExternalApiCall } = await import('../utils/logger.js');
   logExternalApiCall({
     service: 'pinterest',
     operation: 'list_pins',
@@ -137,7 +134,6 @@ export async function exchangePinterestCode(code) {
 
   if (!res.ok) {
     const err = await res.text();
-    const { logExternalApiCall } = await import('../utils/logger.js');
     logExternalApiCall({
       service: 'pinterest',
       operation: 'exchange_code',
@@ -150,7 +146,6 @@ export async function exchangePinterestCode(code) {
     });
     throw new Error(`Pinterest token: ${res.status} ${err}`);
   }
-  const { logExternalApiCall } = await import('../utils/logger.js');
   logExternalApiCall({
     service: 'pinterest',
     operation: 'exchange_code',

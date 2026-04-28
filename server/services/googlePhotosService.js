@@ -1,6 +1,7 @@
 /**
  * Google Photos Library API — requires OAuth2 access token with photoslibrary.readonly scope.
  */
+import { logExternalApiCall } from '../utils/logger.js';
 
 /**
  * List albums.
@@ -12,7 +13,6 @@ export async function listAlbums(accessToken) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) {
     const err = await res.text();
-    const { logExternalApiCall } = await import('../utils/logger.js');
     logExternalApiCall({
       service: 'google_photos',
       operation: 'list_albums',
@@ -26,7 +26,6 @@ export async function listAlbums(accessToken) {
     throw new Error(`Google Photos albums: ${res.status} ${err}`);
   }
   const data = await res.json();
-  const { logExternalApiCall } = await import('../utils/logger.js');
   logExternalApiCall({
     service: 'google_photos',
     operation: 'list_albums',
@@ -60,7 +59,6 @@ export async function listMediaInAlbum(accessToken, albumId) {
   });
   if (!res.ok) {
     const err = await res.text();
-    const { logExternalApiCall } = await import('../utils/logger.js');
     logExternalApiCall({
       service: 'google_photos',
       operation: 'list_media_in_album',
@@ -75,7 +73,6 @@ export async function listMediaInAlbum(accessToken, albumId) {
     throw new Error(`Google Photos media: ${res.status} ${err}`);
   }
   const data = await res.json();
-  const { logExternalApiCall } = await import('../utils/logger.js');
   logExternalApiCall({
     service: 'google_photos',
     operation: 'list_media_in_album',
