@@ -80,6 +80,17 @@ export function isGroundingConfigured() {
   return Boolean(vx.projectId && vx.location);
 }
 
+/**
+ * Google Photos Picker API. The actual gate is whether the user has
+ * granted the photospicker.mediaitems.readonly scope (checked at request
+ * time against their stored token). At config time the only knob is
+ * GOOGLE_PHOTOS_PICKER=false to disable the surface entirely.
+ */
+export function isGooglePhotosPickerConfigured() {
+  if (trimmed(process.env.GOOGLE_PHOTOS_PICKER).toLowerCase() === 'false') return false;
+  return true;
+}
+
 export function isFirebaseAdminConfigured() {
   if (trimmed(process.env.GOOGLE_APPLICATION_CREDENTIALS)) return true;
   return Boolean(
@@ -142,6 +153,14 @@ export function getServiceStatus() {
         : 'Vertex project/location is not set, so grounded suggestions are unavailable.',
   };
 
+  const pickerEnabled = isGooglePhotosPickerConfigured();
+  const googlePhotosPicker = {
+    configured: pickerEnabled,
+    reason: pickerEnabled
+      ? undefined
+      : 'Google Photos Picker is disabled (GOOGLE_PHOTOS_PICKER=false).',
+  };
+
   return {
     firebase,
     gemini,
@@ -149,5 +168,6 @@ export function getServiceStatus() {
     googleSearch,
     vertexFlashImage,
     grounding,
+    googlePhotosPicker,
   };
 }

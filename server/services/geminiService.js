@@ -410,9 +410,16 @@ ${safeImages}
 ${FENCE}
 
 Blueprint requirements:
-- Provide an estimated room size in blueprint.room.width and blueprint.room.height (in cm).
-- Provide estimated dimensions for each placed element in elements[].w and elements[].h (in cm).
-- Use plausible real-world sizes; keep all x/y/w/h within the room bounds.
+- Coordinate system: ALL of room.width, room.height, elements[].x, elements[].y, elements[].w, elements[].h are in the SAME unit (cm by default). The room's top-left corner is (0, 0); +x goes right, +y goes down.
+- Provide an estimated room size in blueprint.room.width and blueprint.room.height (in cm). Plausible bedrooms / studios are 300–500 cm per side; living rooms 400–700 cm.
+- Provide plausible real-world dimensions for each element (e.g. queen bed ≈ 150×200 cm, sofa ≈ 200×85 cm, coffee table ≈ 110×60 cm, desk ≈ 140×60 cm, dining chair ≈ 50×50 cm, floor lamp ≈ 35×35 cm, area rug ≈ 200×140 cm).
+- Constraints, in order of priority:
+  1. Every element MUST satisfy x >= 0, y >= 0, x + w <= room.width, y + h <= room.height. Do NOT extend past a wall.
+  2. Furniture should NOT overlap other furniture. A small (≤10 cm) overlap with a rug is fine; rugs may sit under a sofa or coffee table.
+  3. Leave at least 60 cm of clear walkway between major furniture pieces.
+  4. Place windows and doors flush against a wall: their (x,y) must touch room edge x=0, x=room.width-w, y=0, or y=room.height-h. Window depth (the dimension perpendicular to the wall) should be 4–8 cm.
+  5. Place a single primary anchor first (bed in a bedroom, sofa in a living room) and arrange other items around it.
+- Limit the layout to at most 14 elements. Quality over quantity.
 
 Return ONLY valid JSON (no markdown):
 {

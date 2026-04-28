@@ -16,6 +16,7 @@ const DEFAULT_STATUS = {
   googleSearch: { configured: false },
   vertexFlashImage: { configured: false },
   grounding: { configured: false },
+  googlePhotosPicker: { configured: false },
 };
 
 const ConfigContext = createContext({
@@ -50,6 +51,7 @@ export function ConfigProvider({ children }) {
       isGoogleSearchConfigured: !!status.googleSearch?.configured,
       isVertexFlashImageConfigured: !!status.vertexFlashImage?.configured,
       isGroundingConfigured: !!status.grounding?.configured,
+      isGooglePhotosPickerConfigured: !!status.googlePhotosPicker?.configured,
       isFirebaseAdminConfigured: !!status.firebase?.configured,
     }),
     [status, loading]

@@ -11,10 +11,12 @@ import {
   runValidators,
   validateBoardId,
   validateAlbumId,
+  validateSessionId,
   validateOptionalAccessToken,
   validateOptionalLimit,
 } from '../middleware/validate.js';
 import * as googlePhotos from '../services/googlePhotosService.js';
+import * as googlePhotosPicker from '../services/googlePhotosPickerService.js';
 import * as pinterest from '../services/pinterestService.js';
 import * as youtube from '../services/youtubeService.js';
 import { getUserDoc } from '../services/firestoreService.js';
@@ -23,7 +25,7 @@ import {
   sendError,
   requireService,
 } from '../utils/httpError.js';
-import { isPinterestConfigured } from '../config/secrets.js';
+import { isPinterestConfigured, isGooglePhotosPickerConfigured } from '../config/secrets.js';
 
 const router = express.Router();
 
@@ -125,6 +127,133 @@ router.get(
         'Unable to fetch Google Photos media.'
       );
     }
+  })
+);
+
+/* ----------------------- Google Photos Picker ----------------------- */
+//
+// The Picker API is the post-2025 replacement for the deprecated Library
+// read scopes. The flow is:
+//
+//   1. Client POSTs /picker/session — server creates a session with the
+//      user's stored Google access token and returns the pickerUri the
+//      client opens in a new tab.
+//   2. Client polls GET /picker/session/:id every few seconds (using the
+//      server's pollingConfig) until `mediaItemsSet === true`.
+//   3. Client POSTs /api/media/process-picker-items with the sessionId to
+//      run analysis + concept generation against the picked items.
+//   4. Best-effort DELETE /picker/session/:id to clean up.
+
+function isPickerScopeError(err) {
+  if (!err) return false;
+  const status = err.status || err.code;
+  if (status === 401 || status === 403) return true;
+  const msg = String(err.message || '').toLowerCase();
+  return msg.includes('insufficient') || msg.includes('scope') || msg.includes('permission');
+}
+
+router.post(
+  '/google-photos/picker/session',
+  verifyFirebaseToken,
+  requireService(
+    isGooglePhotosPickerConfigured,
+    'Google Photos Picker is not enabled on this server.'
+  ),
+  asyncHandler(async (req, res) => {
+    const token = await resolveGoogleToken(req);
+    if (!token) {
+      return sendError(
+        res,
+        403,
+        'NOT_CONNECTED',
+        'Connect your Google account in Settings to use Google Photos.'
+      );
+    }
+    try {
+      const session = await googlePhotosPicker.createSession(String(token));
+      res.json({
+        ok: true,
+        sessionId: session.id,
+        pickerUri: session.pickerUri,
+        expireTime: session.expireTime || null,
+        pollingConfig: session.pollingConfig || null,
+        mediaItemsSet: Boolean(session.mediaItemsSet),
+      });
+    } catch (err) {
+      console.warn('[picker:create_session]', err.message);
+      if (isPickerScopeError(err)) {
+        return sendError(
+          res,
+          403,
+          'GOOGLE_SCOPE_MISSING',
+          'Google Photos Picker permission is missing. Reconnect Google in Settings and grant access.'
+        );
+      }
+      return sendError(res, 502, 'PICKER_FAILED', 'Unable to start a Google Photos session.');
+    }
+  })
+);
+
+router.get(
+  '/google-photos/picker/session/:sessionId',
+  verifyFirebaseToken,
+  requireService(
+    isGooglePhotosPickerConfigured,
+    'Google Photos Picker is not enabled on this server.'
+  ),
+  ...validateSessionId,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const token = await resolveGoogleToken(req);
+    if (!token) {
+      return sendError(res, 403, 'NOT_CONNECTED', 'Google account not connected.');
+    }
+    try {
+      const session = await googlePhotosPicker.pollSession(String(token), req.params.sessionId);
+      res.json({
+        ok: true,
+        sessionId: session.id,
+        mediaItemsSet: Boolean(session.mediaItemsSet),
+        pickerUri: session.pickerUri || null,
+        expireTime: session.expireTime || null,
+        pollingConfig: session.pollingConfig || null,
+      });
+    } catch (err) {
+      console.warn('[picker:poll_session]', err.message);
+      if (err.status === 404) {
+        return sendError(res, 404, 'SESSION_NOT_FOUND', 'That picker session expired or was not found.');
+      }
+      if (isPickerScopeError(err)) {
+        return sendError(res, 403, 'GOOGLE_SCOPE_MISSING', 'Google Photos Picker permission is missing.');
+      }
+      return sendError(res, 502, 'PICKER_FAILED', 'Unable to read picker session state.');
+    }
+  })
+);
+
+router.delete(
+  '/google-photos/picker/session/:sessionId',
+  verifyFirebaseToken,
+  requireService(
+    isGooglePhotosPickerConfigured,
+    'Google Photos Picker is not enabled on this server.'
+  ),
+  ...validateSessionId,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const token = await resolveGoogleToken(req);
+    if (!token) {
+      // Nothing to clean up server-side. Return 200 so the client can
+      // continue without surfacing a permission error.
+      return res.json({ ok: true });
+    }
+    try {
+      await googlePhotosPicker.deleteSession(String(token), req.params.sessionId);
+    } catch (err) {
+      console.warn('[picker:delete_session]', err.message);
+      // Sessions auto-expire — non-fatal.
+    }
+    res.json({ ok: true });
   })
 );
 

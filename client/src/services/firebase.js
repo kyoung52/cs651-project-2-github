@@ -43,7 +43,13 @@ export function getFirebaseAuth() {
 export function getGoogleProvider({ withMediaScopes = false } = {}) {
   const p = new GoogleAuthProvider();
   if (withMediaScopes) {
+    // Library API: deprecated for general use as of 2025-03-31; still works
+    // for app-created albums/photos but most tenants can't grant it.
     p.addScope('https://www.googleapis.com/auth/photoslibrary.readonly');
+    // Picker API: replacement for Library — user explicitly selects photos
+    // in a Google-hosted dialog. Doesn't require the OAuth verification
+    // queue while the consent screen is in Testing mode.
+    p.addScope('https://www.googleapis.com/auth/photospicker.mediaitems.readonly');
     p.addScope('https://www.googleapis.com/auth/youtube.readonly');
     // Force account selection + re-consent so scopes actually apply.
     p.setCustomParameters({ prompt: 'consent select_account' });

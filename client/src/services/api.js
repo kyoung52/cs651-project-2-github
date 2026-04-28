@@ -93,6 +93,7 @@ export async function fetchConfig() {
         googleSearch: { configured: false },
         vertexFlashImage: { configured: false },
         grounding: { configured: false },
+        googlePhotosPicker: { configured: false },
       },
     };
   }

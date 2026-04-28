@@ -726,14 +726,60 @@ code {
   font-size: 0.9rem;
 }
 
-.blueprint-placeholder {
-  margin-top: 1rem;
-  opacity: 0.4;
+/* Larger, full-width SVG canvas. The viewBox handles aspect ratio so we
+   just let the panel decide how wide to render. The light card behind
+   the SVG also gives the floor plan a "drafting paper" feel. */
+.blueprint-canvas {
+  margin-top: 0.85rem;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
 }
 
 .blueprint-svg {
+  display: block;
   width: 100%;
-  max-width: 320px;
+  height: auto;
+  /* No max-width cap — the viewBox preserves aspect ratio at any size.
+     A reasonable max-height keeps very wide rooms from over-stretching. */
+  max-height: 560px;
+  color: var(--text, #e9e9ec);
+}
+
+.blueprint-legend {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.blueprint-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.blueprint-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-width: 1px;
+  border-color: currentColor;
+  /* border-style is set inline per shape (solid for rects, dashed for rugs).
+     border-radius is also set inline (50% for circles like lamps/plants). */
+  background-clip: padding-box;
+}
+
+.blueprint-legend-label {
+  color: var(--text, inherit);
+}
+
+.blueprint-legend-count {
   color: var(--muted);
 }
 

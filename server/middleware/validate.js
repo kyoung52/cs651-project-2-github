@@ -249,6 +249,32 @@ export const validateAlbumId = [
     .withMessage('invalid albumId'),
 ];
 
+// Picker session ids are unguessable Google-issued strings; we accept a
+// permissive shape but cap the length so a hostile client can't push huge
+// values through the request pipeline.
+export const validateSessionId = [
+  param('sessionId')
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 256 })
+    .matches(/^[a-zA-Z0-9._:/-]+$/)
+    .withMessage('invalid sessionId'),
+];
+
+export const validatePickerProcess = [
+  body('sessionId')
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 256 })
+    .matches(/^[a-zA-Z0-9._:/-]+$/)
+    .withMessage('sessionId is required'),
+  body('chatContext').optional().isString().isLength({ max: 8000 }),
+  body('useRealisticFurniture')
+    .optional()
+    .custom((v) => v === true || v === false || v === 'true' || v === 'false')
+    .withMessage('useRealisticFurniture must be boolean'),
+];
+
 export const validateGoogleToken = [
   body('accessToken')
     .isString()

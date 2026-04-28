@@ -19,6 +19,7 @@ import {
   validateProcessUrl,
   validateProcessUrls,
   validateGooglePhotosSelection,
+  validatePickerProcess,
   validateMediaRefine,
   assertSafePublicUrl,
 } from '../middleware/validate.js';
@@ -44,7 +45,8 @@ import {
   requireService,
 } from '../utils/httpError.js';
 import { registerJob, emit, end } from '../utils/jobStream.js';
-import { isGeminiConfigured, isGoogleSearchConfigured, isVertexFlashImagePreviewEnabled } from '../config/secrets.js';
+import { isGeminiConfigured, isGoogleSearchConfigured, isVertexFlashImagePreviewEnabled, isGooglePhotosPickerConfigured } from '../config/secrets.js';
+import * as googlePhotosPicker from '../services/googlePhotosPickerService.js';
 import {
   buildFlashImagePrompt,
   buildFlashImageEditPrompt,
@@ -720,6 +722,190 @@ router.post(
       searchConfigured: isGoogleSearchConfigured(),
       vertexFlashImageConfigured: isVertexFlashImagePreviewEnabled(),
     });
+  })
+);
+
+/**
+ * POST /api/media/process-picker-items — generate from a Picker session.
+ *
+ * After the user finishes picking in Google's hosted dialog, the client
+ * passes the sessionId here. We list the picked items via the Picker API,
+ * download each (host-allowlisted to googleusercontent.com so the user's
+ * bearer token can't be sent to a hostile redirect), analyze + cache, then
+ * run the same generation pipeline as /process-google-photos.
+ *
+ * Best-effort session cleanup runs after the response is sent so a slow
+ * delete never delays the user's render.
+ */
+router.post(
+  '/process-picker-items',
+  verifyFirebaseToken,
+  requireService(isGeminiConfigured, 'AI analysis is not configured on this server.'),
+  requireService(
+    isGooglePhotosPickerConfigured,
+    'Google Photos Picker is not enabled on this server.'
+  ),
+  sanitizeBodyStrings,
+  ...validatePickerProcess,
+  runValidators,
+  asyncHandler(async (req, res) => {
+    const user = await getUserDoc(req.user.uid);
+    const accessToken = user?.googleAccessToken || process.env.DEV_GOOGLE_OAUTH_TOKEN || null;
+    if (!accessToken) {
+      return sendError(res, 403, 'NOT_CONNECTED', 'Google Photos is not connected for this account.');
+    }
+
+    const sessionId = String(req.body.sessionId || '').trim();
+    const chatContext = typeof req.body.chatContext === 'string' ? req.body.chatContext : '';
+    const useRealisticFurniture = req.body.useRealisticFurniture !== 'false';
+    const regenSeed = crypto.randomUUID();
+
+    let listed;
+    try {
+      listed = await googlePhotosPicker.listPickedItems(accessToken, sessionId);
+    } catch (err) {
+      console.warn('[picker:list_items]', err.message);
+      if (err.status === 404) {
+        return sendError(res, 404, 'SESSION_NOT_FOUND', 'That picker session expired. Pick photos again.');
+      }
+      if (err.status === 401 || err.status === 403) {
+        return sendError(
+          res,
+          403,
+          'GOOGLE_SCOPE_MISSING',
+          'Google Photos Picker permission is missing. Reconnect Google in Settings.'
+        );
+      }
+      return sendError(res, 502, 'PICKER_FAILED', 'Unable to read your selected Google Photos.');
+    }
+
+    const rawItems = Array.isArray(listed?.mediaItems) ? listed.mediaItems : [];
+    if (rawItems.length === 0) {
+      return sendError(
+        res,
+        400,
+        'NO_ITEMS',
+        'No photos in the picker session. Reopen the picker and select at least one photo.'
+      );
+    }
+
+    const imageAnalyses = [];
+    const referenceImages = [];
+
+    for (const item of rawItems.slice(0, 6)) {
+      // Picker's mediaFile shape mirrors Library: { baseUrl, mimeType, filename, ... }.
+      const baseUrl = item?.mediaFile?.baseUrl || item?.baseUrl || '';
+      if (!baseUrl) continue;
+      const downloadUrl = toGoogleDownloadUrl(baseUrl);
+      if (!isGooglePhotosHost(downloadUrl)) {
+        return sendError(
+          res,
+          400,
+          'INVALID_PHOTO_HOST',
+          'Selected items must come from Google Photos.'
+        );
+      }
+      try { await assertSafePublicUrl(downloadUrl); }
+      catch { return sendError(res, 400, 'FETCH_BLOCKED', 'Refusing to fetch from a non-public address.'); }
+
+      let arrayBuf, response;
+      try {
+        ({ buffer: arrayBuf, response } = await safeFetchBytes(downloadUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }));
+      } catch (err) {
+        if (err.code === 'TOO_LARGE') return sendError(res, 400, 'TOO_LARGE', 'One of the selected photos is too large (max 10MB).');
+        console.warn('[media:process-picker-items] fetch failed:', err.message);
+        return sendError(res, 400, 'FETCH_FAILED', 'Unable to fetch one of the selected Google Photos items.');
+      }
+
+      const ctHeader = response.headers.get('content-type');
+      if (!ctHeader) {
+        return sendError(res, 400, 'NOT_IMAGE', 'A selected photo did not return a content type.');
+      }
+      const rawType = ctHeader.split(';')[0].trim();
+      if (!ALLOWED_IMAGE_MIMES.has(rawType)) {
+        return sendError(res, 400, 'NOT_IMAGE', 'Selected items must be JPEG, PNG, or WebP images.');
+      }
+
+      const hash = hashContent(arrayBuf);
+      const cached = await getMediaCache(req.user?.uid, hash);
+      let analysis = cached?.analysis;
+      if (!analysis) {
+        analysis = await analyzeImage(arrayBuf, rawType);
+        await setMediaCache(req.user?.uid, hash, { type: 'image', mimeType: rawType, analysis });
+      }
+      imageAnalyses.push(analysis);
+      if (referenceImages.length < 3) referenceImages.push({ buffer: arrayBuf, mimeType: rawType });
+    }
+
+    if (imageAnalyses.length === 0) {
+      return sendError(res, 400, 'NO_VALID_MEDIA', 'No analyzable photos were found in the picker session.');
+    }
+
+    const concept = await generateRoomConcept({
+      imageAnalyses,
+      audioAnalyses: [],
+      chatContext,
+      useRealisticFurniture,
+    });
+
+    const flashImagePrompt = buildFlashImagePrompt({
+      concept,
+      chatContext,
+      audioAnalyses: [],
+      regenSeed,
+    });
+
+    const kw = concept.searchKeywords?.[0] || concept.styleLabel || 'interior design';
+    const similar = await safeSimilarImages(kw);
+    let featuredImage = similar[0]?.link || DEFAULT_FEATURED;
+    const vertexImageUri = await safeVertexFlashImagePreview({
+      concept,
+      chatContext,
+      referenceImages,
+      audioAnalyses: [],
+      regenSeed,
+    });
+    if (vertexImageUri) featuredImage = vertexImageUri;
+
+    res.json({
+      concept: { ...concept, featuredImage },
+      similarInspiration: similar,
+      imageAnalyses,
+      audioAnalyses: [],
+      regen: {
+        regenSeed,
+        conceptGenInput: {
+          chatContext,
+          useRealisticFurniture,
+          imageAnalyses,
+          audioAnalyses: [],
+          blueprint: concept?.blueprint || null,
+        },
+        flashImagePrompt,
+        modelsUsed: {
+          analysisModel: getVertexTextModelIds().analysis,
+          textModel: getVertexTextModelIds().text,
+          imageModel: getVertexFlashImageModelId(),
+          vertexProjectId:
+            process.env.VERTEX_PROJECT_ID ||
+            process.env.GOOGLE_CLOUD_PROJECT ||
+            process.env.GCLOUD_PROJECT ||
+            null,
+          vertexLocation: process.env.VERTEX_LOCATION || 'us-central1',
+        },
+        createdAt: new Date().toISOString(),
+      },
+      searchConfigured: isGoogleSearchConfigured(),
+      vertexFlashImageConfigured: isVertexFlashImagePreviewEnabled(),
+    });
+
+    // Best-effort cleanup. Sessions auto-expire after ~30 min; we kick the
+    // delete after responding so it never blocks the render.
+    googlePhotosPicker
+      .deleteSession(accessToken, sessionId)
+      .catch((err) => console.warn('[picker:cleanup_failed]', err?.message || err));
   })
 );
 

@@ -92,6 +92,11 @@ export function AuthProvider({ children }) {
    * Request Google Photos / YouTube scopes and store the access token server-side.
    * Uses a popup re-consent flow for the currently signed-in user.
    */
+  /**
+   * Resolves to a result object so callers can act on which scope was
+   * actually granted. Picker is the preferred path post-2025; Library is
+   * kept as a fallback in case the user only consented to that.
+   */
   const connectGoogleMedia = async () => {
     setError(null);
     const auth = getFirebaseAuth();
@@ -103,9 +108,13 @@ export function AuthProvider({ children }) {
       const token = await result.user.getIdToken();
       setAuthToken(token);
       const { data } = await api.post('/api/auth/google-token', { accessToken });
-      return Boolean(data?.hasPhotosScope);
+      return {
+        ok: Boolean(data?.hasPhotosScope || data?.hasPickerScope),
+        hasPhotosScope: Boolean(data?.hasPhotosScope),
+        hasPickerScope: Boolean(data?.hasPickerScope),
+      };
     }
-    return false;
+    return { ok: false, hasPhotosScope: false, hasPickerScope: false };
   };
 
   const logout = async () => {

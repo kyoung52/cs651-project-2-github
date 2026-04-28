@@ -79,6 +79,7 @@ router.post(
       ok: true,
       scopes,
       hasPhotosScope: scopes.includes('https://www.googleapis.com/auth/photoslibrary.readonly'),
+      hasPickerScope: scopes.includes('https://www.googleapis.com/auth/photospicker.mediaitems.readonly'),
     });
   })
 );
