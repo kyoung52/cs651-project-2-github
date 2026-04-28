@@ -26,6 +26,7 @@ export const ALLOWED_KEYS = [
   'APP_PUBLIC_URL',
   'APP_API_BASE_URL',
   'APP_PRIVACY_CONTACT_EMAIL',
+  'APP_GA_MEASUREMENT_ID',
 ];
 
 function parseDotenv(text) {
@@ -97,6 +98,14 @@ export function toEsbuildDefine(env, mode) {
   for (const [k, v] of Object.entries(env)) {
     define[`import.meta.env.${k}`] = JSON.stringify(v ?? '');
   }
+  // Some libs (and our code) may read `import.meta.env` as an object. esbuild's
+  // `define` only replaces exact expressions, so we also provide a concrete object.
+  define['import.meta.env'] = JSON.stringify({
+    ...env,
+    MODE: mode,
+    PROD: mode === 'production',
+    DEV: mode !== 'production',
+  });
   define['import.meta.env.MODE'] = JSON.stringify(mode);
   define['import.meta.env.PROD'] = JSON.stringify(mode === 'production');
   define['import.meta.env.DEV'] = JSON.stringify(mode !== 'production');
