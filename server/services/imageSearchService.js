@@ -2,6 +2,7 @@
  * Google Custom Search JSON API — image results with relevance-based confidence scores.
  */
 import { google } from 'googleapis';
+import { logExternalApiCall } from '../utils/logger.js';
 
 function getCx() {
   const key = process.env.GOOGLE_SEARCH_API_KEY;
@@ -21,13 +22,41 @@ export async function searchSimilarImages(query, limit = 8) {
   const { key, cx } = getCx();
   const customsearch = google.customsearch('v1');
 
-  const res = await customsearch.cse.list({
-    auth: key,
-    cx,
-    q: query,
-    searchType: 'image',
-    num: Math.min(Math.max(limit, 1), 10),
-    safe: 'active',
+  const start = Date.now();
+  let res;
+  try {
+    res = await customsearch.cse.list({
+      auth: key,
+      cx,
+      q: query,
+      searchType: 'image',
+      num: Math.min(Math.max(limit, 1), 10),
+      safe: 'active',
+    });
+  } catch (err) {
+    logExternalApiCall({
+      service: 'google_custom_search',
+      operation: 'image_search',
+      method: 'GET',
+      url: 'googleapis.customsearch.cse.list',
+      status: err?.code ? Number(err.code) : undefined,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err?.message || String(err),
+      extra: { q: String(query).slice(0, 200) },
+    });
+    throw err;
+  }
+
+  logExternalApiCall({
+    service: 'google_custom_search',
+    operation: 'image_search',
+    method: 'GET',
+    url: 'googleapis.customsearch.cse.list',
+    status: 200,
+    ok: true,
+    durationMs: Date.now() - start,
+    extra: { q: String(query).slice(0, 200) },
   });
 
   const items = res.data.items || [];

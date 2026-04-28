@@ -8,6 +8,7 @@
  * - Exposes `fetchConfig()` for /api/config.
  */
 import axios from 'axios';
+import ReactGA from 'react-ga4';
 
 const baseURL = import.meta.env.APP_API_BASE_URL || '';
 
@@ -51,6 +52,16 @@ api.interceptors.response.use(
     err.code = code;
     err.status = status;
     err.original = error;
+
+    try {
+      ReactGA.event('api_error', {
+        category: 'api',
+        action: `${status}:${code}`,
+        label: String(error?.config?.url || '').slice(0, 120),
+      });
+    } catch {
+      // analytics optional
+    }
     return Promise.reject(err);
   }
 );

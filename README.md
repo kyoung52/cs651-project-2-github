@@ -140,6 +140,11 @@ Client-side (`client/.env`, baked at build time):
   `APP_FIREBASE_STORAGE_BUCKET`, `APP_FIREBASE_MESSAGING_SENDER_ID`,
   `APP_FIREBASE_APP_ID`
 - `APP_PUBLIC_URL`, `APP_API_BASE_URL`, `APP_PRIVACY_CONTACT_EMAIL`
+- `APP_GA_MEASUREMENT_ID` (optional GA4 client analytics)
+
+Server-side analytics (optional):
+
+- `GA_MEASUREMENT_ID`, `GA_API_SECRET` (GA4 Measurement Protocol)
 
 The allowlist lives in [`client/scripts/env.mjs`](client/scripts/env.mjs); no
 other env vars can sneak into the browser bundle.

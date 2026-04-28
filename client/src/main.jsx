@@ -6,7 +6,10 @@ import { AuthProvider } from './hooks/useAuth.jsx';
 import { ConfigProvider } from './hooks/useConfig.jsx';
 import { WorkspaceProvider } from './hooks/useWorkspace.jsx';
 import { ToastProvider } from './components/ui/Toast.jsx';
+import { initAnalytics } from './services/analytics.js';
 import './index.css';
+
+initAnalytics();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

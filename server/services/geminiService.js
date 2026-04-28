@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 import { HttpError } from '../utils/httpError.js';
 import { VertexAI } from '@google-cloud/vertexai';
+import { logExternalApiCall } from '../utils/logger.js';
 
 // Vertex model availability changes over time (models retire / IDs change).
 // Defaults follow current Vertex docs for Gemini 2.5 Flash in `us-central1`.
@@ -92,12 +93,33 @@ async function generateContentWithModelFallback({
 
   for (let i = 0; i < candidates.length; i += 1) {
     const modelId = candidates[i];
+    const start = Date.now();
     try {
       const model = client.getGenerativeModel({ model: modelId });
-      return await model.generateContent(request);
+      const out = await model.generateContent(request);
+      logExternalApiCall({
+        service: 'vertex_ai',
+        operation: `gemini_${label}_generate`,
+        method: 'POST',
+        url: `vertex:${modelId}`,
+        status: 200,
+        ok: true,
+        durationMs: Date.now() - start,
+      });
+      return out;
     } catch (err) {
       lastErr = err;
       const status = vertexHttpStatus(err);
+      logExternalApiCall({
+        service: 'vertex_ai',
+        operation: `gemini_${label}_generate`,
+        method: 'POST',
+        url: `vertex:${modelId}`,
+        status: typeof status === 'number' ? status : undefined,
+        ok: false,
+        durationMs: Date.now() - start,
+        errorMessage: err?.message || String(err),
+      });
       if (status === 429 || status === 401 || status === 403) {
         throw err;
       }

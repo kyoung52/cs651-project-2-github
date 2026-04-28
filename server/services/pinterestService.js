@@ -9,16 +9,39 @@ const BASE = 'https://api.pinterest.com/v5';
  * @param {string} accessToken
  */
 export async function listBoards(accessToken) {
-  const res = await fetch(`${BASE}/boards`, {
+  const url = `${BASE}/boards`;
+  const start = Date.now();
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
   if (!res.ok) {
     const err = await res.text();
+    const { logExternalApiCall } = await import('../utils/logger.js');
+    logExternalApiCall({
+      service: 'pinterest',
+      operation: 'list_boards',
+      method: 'GET',
+      url,
+      status: res.status,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err,
+    });
     throw new Error(`Pinterest boards: ${res.status} ${err}`);
   }
   const data = await res.json();
+  const { logExternalApiCall } = await import('../utils/logger.js');
+  logExternalApiCall({
+    service: 'pinterest',
+    operation: 'list_boards',
+    method: 'GET',
+    url,
+    status: res.status,
+    ok: true,
+    durationMs: Date.now() - start,
+  });
   return data.items || data.data || [];
 }
 
@@ -28,16 +51,41 @@ export async function listBoards(accessToken) {
  */
 export async function listPins(accessToken, boardId) {
   const id = encodeURIComponent(boardId);
-  const res = await fetch(`${BASE}/boards/${id}/pins`, {
+  const url = `${BASE}/boards/${id}/pins`;
+  const start = Date.now();
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
   if (!res.ok) {
     const err = await res.text();
+    const { logExternalApiCall } = await import('../utils/logger.js');
+    logExternalApiCall({
+      service: 'pinterest',
+      operation: 'list_pins',
+      method: 'GET',
+      url,
+      status: res.status,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err,
+      extra: { boardId: String(boardId).slice(0, 64) },
+    });
     throw new Error(`Pinterest pins: ${res.status} ${err}`);
   }
   const data = await res.json();
+  const { logExternalApiCall } = await import('../utils/logger.js');
+  logExternalApiCall({
+    service: 'pinterest',
+    operation: 'list_pins',
+    method: 'GET',
+    url,
+    status: res.status,
+    ok: true,
+    durationMs: Date.now() - start,
+    extra: { boardId: String(boardId).slice(0, 64) },
+  });
   return data.items || data.data || [];
 }
 
@@ -76,7 +124,9 @@ export async function exchangePinterestCode(code) {
   });
 
   const basic = Buffer.from(`${appId}:${secret}`).toString('base64');
-  const res = await fetch('https://api.pinterest.com/v5/oauth/token', {
+  const url = 'https://api.pinterest.com/v5/oauth/token';
+  const start = Date.now();
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -87,7 +137,28 @@ export async function exchangePinterestCode(code) {
 
   if (!res.ok) {
     const err = await res.text();
+    const { logExternalApiCall } = await import('../utils/logger.js');
+    logExternalApiCall({
+      service: 'pinterest',
+      operation: 'exchange_code',
+      method: 'POST',
+      url,
+      status: res.status,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err,
+    });
     throw new Error(`Pinterest token: ${res.status} ${err}`);
   }
+  const { logExternalApiCall } = await import('../utils/logger.js');
+  logExternalApiCall({
+    service: 'pinterest',
+    operation: 'exchange_code',
+    method: 'POST',
+    url,
+    status: res.status,
+    ok: true,
+    durationMs: Date.now() - start,
+  });
   return res.json();
 }

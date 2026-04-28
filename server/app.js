@@ -20,6 +20,7 @@ import geminiRoutes from './routes/gemini.js';
 import searchRoutes from './routes/search.js';
 import configRoutes from './routes/config.js';
 import exploreRoutes from './routes/explore.js';
+import { requestLoggingMiddleware } from './middleware/requestLogging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -191,6 +192,7 @@ export function createApp({ isProd = process.env.NODE_ENV === 'production' } = {
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   app.use('/api', apiLimiter);
+  app.use(requestLoggingMiddleware);
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'roomify', ts: new Date().toISOString() });

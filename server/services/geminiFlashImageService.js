@@ -13,6 +13,7 @@ import {
   createPartFromText,
   createPartFromBase64,
 } from '@google/genai';
+import { logExternalApiCall } from '../utils/logger.js';
 
 export const DEFAULT_VERTEX_FLASH_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
@@ -133,6 +134,7 @@ export async function generateRoomSceneDataUri({
   const contents = createUserContent(parts);
 
   let response;
+  const start = Date.now();
   try {
     response = await client.models.generateContent({
       model: getVertexFlashImageModelId(),
@@ -143,8 +145,27 @@ export async function generateRoomSceneDataUri({
     });
   } catch (err) {
     console.warn('[vertex:flash-image] generateContent failed:', err?.message || err);
+    logExternalApiCall({
+      service: 'vertex_ai',
+      operation: 'gemini_flash_image_generate',
+      method: 'POST',
+      url: `vertex:${getVertexFlashImageModelId()}`,
+      status: err?.code ? Number(err.code) : undefined,
+      ok: false,
+      durationMs: Date.now() - start,
+      errorMessage: err?.message || String(err),
+    });
     return null;
   }
+  logExternalApiCall({
+    service: 'vertex_ai',
+    operation: 'gemini_flash_image_generate',
+    method: 'POST',
+    url: `vertex:${getVertexFlashImageModelId()}`,
+    status: 200,
+    ok: true,
+    durationMs: Date.now() - start,
+  });
 
   const uri = extractImageDataUri(response);
   if (!uri) {
