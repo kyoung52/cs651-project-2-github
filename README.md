@@ -121,6 +121,9 @@ See [`.env.example`](.env.example) (server) and
 required at boot — the app detects missing keys and disables just the
 affected features via `GET /api/config`.
 
+For detailed third-party setup (Pinterest OAuth redirect URL, etc), see
+[`INTEGRATIONS.md`](INTEGRATIONS.md).
+
 Server-side (root `.env`):
 
 - **Firebase Admin** — `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,

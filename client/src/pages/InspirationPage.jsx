@@ -12,6 +12,13 @@ function getBaseUrl(media) {
   return typeof media?.baseUrl === 'string' ? media.baseUrl : '';
 }
 
+function truncate(s, max) {
+  const str = typeof s === 'string' ? s.trim() : '';
+  if (!str) return '';
+  if (str.length <= max) return str;
+  return `${str.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
 // Bound the polling cadence the server hands us. The Picker docs default
 // to a 5s interval and a 5-minute timeout; we still cap defensively in
 // case the server returns something unexpected.
@@ -32,10 +39,12 @@ function durationToMs(d, fallback) {
 
 export default function InspirationPage() {
   const { connectGoogleMedia } = useAuth();
-  const { isGooglePhotosPickerConfigured } = useConfig();
+  const { isGooglePhotosPickerConfigured, isPinterestConfigured, status } = useConfig();
   const { setDashboardState, resetDashboardState } = useWorkspace();
   const toast = useToast();
   const nav = useNavigate();
+
+  const [source, setSource] = useState('google'); // 'google' | 'pinterest'
 
   const [albums, setAlbums] = useState([]);
   const [media, setMedia] = useState([]);
@@ -44,6 +53,13 @@ export default function InspirationPage() {
   const [busy, setBusy] = useState(false);
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
+
+  const [pinterestBoards, setPinterestBoards] = useState([]);
+  const [pinterestPins, setPinterestPins] = useState([]);
+  const [selectedPinterestBoard, setSelectedPinterestBoard] = useState(null);
+  const [selectedPinterestPins, setSelectedPinterestPins] = useState([]); // [{ id, imageUrl, title, description, link }]
+  const [pinterestConnected, setPinterestConnected] = useState(false);
+  const [loadingPinterest, setLoadingPinterest] = useState(false);
 
   // Picker-flow state
   const [pickerSession, setPickerSession] = useState(null); // { sessionId, pickerUri, expireTime }
@@ -75,6 +91,31 @@ export default function InspirationPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPinterestBoards() {
+      if (!isPinterestConfigured) return;
+      setLoadingPinterest(true);
+      try {
+        const { data } = await api.get('/api/social/pinterest/boards');
+        if (cancelled) return;
+        setPinterestConnected(Boolean(data?.connected));
+        const boards = Array.isArray(data?.boards) ? data.boards : [];
+        setPinterestBoards(boards);
+      } catch (err) {
+        if (cancelled) return;
+        toast.push({ variant: 'warn', title: 'Pinterest boards', message: err?.message || 'Unable to load boards.' });
+      } finally {
+        if (!cancelled) setLoadingPinterest(false);
+      }
+    }
+
+    if (source === 'pinterest') loadPinterestBoards();
+    return () => {
+      cancelled = true;
+    };
+  }, [source, isPinterestConfigured, toast]);
 
   useEffect(() => {
     return () => {
@@ -279,6 +320,26 @@ export default function InspirationPage() {
     }
   }
 
+  async function openPinterestBoard(board) {
+    if (!board?.id) return;
+    setSelectedPinterestBoard(board);
+    setPinterestPins([]);
+    setSelectedPinterestPins([]);
+    setLoadingPinterest(true);
+    try {
+      const { data } = await api.get(
+        `/api/social/pinterest/boards/${encodeURIComponent(board.id)}/pins`
+      );
+      const pins = Array.isArray(data?.pins) ? data.pins : [];
+      setPinterestPins(pins);
+      setPinterestConnected(Boolean(data?.connected));
+    } catch (err) {
+      toast.push({ variant: 'error', title: 'Pinterest', message: err?.message || 'Unable to load pins.' });
+    } finally {
+      setLoadingPinterest(false);
+    }
+  }
+
   const moodboardItems = useMemo(
     () =>
       selected
@@ -290,6 +351,20 @@ export default function InspirationPage() {
         }))
         .filter((x) => x.id && x.baseUrl),
     [selected]
+  );
+
+  const pinterestMoodboardItems = useMemo(
+    () =>
+      selectedPinterestPins
+        .map((p) => ({
+          id: p.id,
+          imageUrl: p.imageUrl,
+          title: p.title,
+          description: p.description,
+          link: p.link,
+        }))
+        .filter((x) => x.id && x.imageUrl),
+    [selectedPinterestPins]
   );
 
   function toggleMediaItem(item) {
@@ -313,6 +388,56 @@ export default function InspirationPage() {
         },
       ];
     });
+  }
+
+  function togglePinterestPin(pin) {
+    const id = String(pin?.id || '');
+    const imageUrl = typeof pin?.imageUrl === 'string' ? pin.imageUrl : '';
+    if (!id || !imageUrl) return;
+    setSelectedPinterestPins((prev) => {
+      const exists = prev.some((p) => p.id === id);
+      if (exists) return prev.filter((p) => p.id !== id);
+      if (prev.length >= 6) {
+        toast.push({ variant: 'warn', title: 'Moodboard', message: 'Select up to 6 pins for the MVP.' });
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id,
+          imageUrl,
+          title: typeof pin?.title === 'string' ? pin.title : '',
+          description: typeof pin?.description === 'string' ? pin.description : '',
+          link: typeof pin?.link === 'string' ? pin.link : '',
+        },
+      ];
+    });
+  }
+
+  function importPinterestBoard() {
+    if (!Array.isArray(pinterestPins) || pinterestPins.length === 0) return;
+    const picked = [];
+    for (const p of pinterestPins) {
+      const id = String(p?.id || '');
+      const imageUrl = typeof p?.imageUrl === 'string' ? p.imageUrl : '';
+      if (!id || !imageUrl) continue;
+      picked.push({
+        id,
+        imageUrl,
+        title: typeof p?.title === 'string' ? p.title : '',
+        description: typeof p?.description === 'string' ? p.description : '',
+        link: typeof p?.link === 'string' ? p.link : '',
+      });
+      if (picked.length >= 6) break;
+    }
+    setSelectedPinterestPins(picked);
+    if (picked.length === 0) {
+      toast.push({
+        variant: 'warn',
+        title: 'No images found',
+        message: 'That board did not return pins with usable image URLs.',
+      });
+    }
   }
 
   async function generateFromMoodboard() {
@@ -349,6 +474,69 @@ export default function InspirationPage() {
       nav('/dashboard');
     } catch (err) {
       toast.push({ variant: 'error', title: 'Generate', message: err.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateFromPinterestMoodboard() {
+    if (pinterestMoodboardItems.length === 0) return;
+    setBusy(true);
+    try {
+      const boardName = selectedPinterestBoard?.name || selectedPinterestBoard?.title || '';
+      const boardLine = boardName ? `Board: ${truncate(boardName, 120)}` : 'Pinterest selection';
+      const pinLines = pinterestMoodboardItems
+        .slice(0, 6)
+        .map((p, idx) => {
+          const title = truncate(p.title, 120);
+          const desc = truncate(p.description, 200);
+          const t = title ? `Title: ${title}` : '';
+          const d = desc ? `Notes: ${desc}` : '';
+          const bits = [t, d].filter(Boolean).join(' — ');
+          return bits ? `${idx + 1}) ${bits}` : `${idx + 1}) (no text)`;
+        })
+        .join('\n');
+
+      const chatContext =
+        'Generate a cohesive room concept inspired by this Pinterest moodboard.\n' +
+        `${boardLine}\n` +
+        (pinLines ? `Pin notes:\n${pinLines}\n` : '') +
+        'Focus on style, palette, materials, and layout.';
+
+      const urls = pinterestMoodboardItems.map((p) => p.imageUrl).filter(Boolean).slice(0, 6);
+      const { data } = await api.post(
+        '/api/media/process-urls',
+        {
+          urls,
+          chatContext,
+          useRealisticFurniture: true,
+        },
+        {
+          timeout: 420_000,
+        }
+      );
+
+      resetDashboardState();
+      setDashboardState({
+        messages: [
+          { role: 'bot', text: 'Loaded inspiration from Pinterest moodboard.' },
+          { role: 'user', text: chatContext },
+        ],
+        chatContext,
+        files: [],
+        audioNames: [],
+        realistic: true,
+        concept: data?.concept || null,
+        similar: data?.similarInspiration || [],
+        searchWasConfigured: data?.searchConfigured ?? null,
+        analysisKeywords: [],
+        tab: 'renders',
+        regen: data?.regen || null,
+      });
+
+      nav('/dashboard');
+    } catch (err) {
+      toast.push({ variant: 'error', title: 'Generate', message: err?.message || 'Generation failed.' });
     } finally {
       setBusy(false);
     }
@@ -394,20 +582,191 @@ export default function InspirationPage() {
       <main className="content">
         <h1>Inspiration</h1>
         <p className="muted">
-          Pick photos directly from Google Photos with the new Picker, or browse album-by-album below.
+          Build a moodboard from Google Photos or Pinterest, then generate a room concept for your workspace.
         </p>
 
-        {!googleConnected ? (
+        <section className="panel">
+          <div className="row-actions compact">
+            <button
+              type="button"
+              className={source === 'google' ? 'btn-primary' : 'btn-outline'}
+              onClick={() => setSource('google')}
+              disabled={busy}
+            >
+              Google Photos
+            </button>
+            <button
+              type="button"
+              className={source === 'pinterest' ? 'btn-primary' : 'btn-outline'}
+              onClick={() => setSource('pinterest')}
+              disabled={busy}
+              title={!isPinterestConfigured ? 'Pinterest is not configured on this server.' : undefined}
+            >
+              Pinterest
+            </button>
+          </div>
+          {source === 'pinterest' && !isPinterestConfigured ? (
+            <p className="hint small mt-2">{status?.pinterest?.reason || 'Pinterest is not configured.'}</p>
+          ) : null}
+        </section>
+
+        {source === 'pinterest' ? (
+          !isPinterestConfigured ? null : !pinterestConnected ? (
+            <EmptyState
+              title="Connect Pinterest"
+              description="Connect Pinterest in Settings to browse your boards and import pins into a moodboard."
+              action={
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => nav('/settings')}
+                >
+                  Open Settings
+                </button>
+              }
+            />
+          ) : (
+            <div className="inspo-grid mt-2">
+              <section className="panel">
+                <div className="row-between">
+                  <h2 className="mb-0">Boards</h2>
+                  {loadingPinterest ? <div className="spinner" /> : null}
+                </div>
+                {pinterestBoards.length === 0 ? (
+                  <p className="hint small">No boards found.</p>
+                ) : (
+                  <ul className="project-list">
+                    {pinterestBoards.map((b) => (
+                      <li key={b.id} className="project-card">
+                        <div className="row-between">
+                          <div>
+                            <div className="strong">{b.name || b.title || 'Untitled board'}</div>
+                            <div className="hint small">{b.pin_count ? `${b.pin_count} pins` : ''}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-outline small"
+                            onClick={() => openPinterestBoard(b)}
+                            disabled={busy || loadingPinterest}
+                          >
+                            View pins
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="row-between">
+                  <h2 className="mb-0">Pins</h2>
+                  {loadingPinterest ? <div className="spinner" /> : null}
+                </div>
+                {selectedPinterestBoard ? (
+                  <p className="hint small mb-2">
+                    Board: {selectedPinterestBoard.name || selectedPinterestBoard.title || selectedPinterestBoard.id}
+                  </p>
+                ) : (
+                  <p className="hint small mb-2">Select a board to view pins.</p>
+                )}
+
+                {selectedPinterestBoard ? (
+                  <div className="row-actions compact mb-2">
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      onClick={importPinterestBoard}
+                      disabled={busy || loadingPinterest || pinterestPins.length === 0}
+                    >
+                      Import board (up to 6)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setSelectedPinterestPins([])}
+                      disabled={busy || selectedPinterestPins.length === 0}
+                    >
+                      Clear selection
+                    </button>
+                  </div>
+                ) : null}
+
+                {pinterestPins.length === 0 ? null : (
+                  <div className="pin-grid">
+                    {pinterestPins.map((p) => {
+                      const url = p.imageUrl;
+                      const on = selectedPinterestPins.some((s) => s.id === String(p?.id || ''));
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`pin-tile ${on ? 'selected' : ''}`}
+                          onClick={() => togglePinterestPin(p)}
+                          disabled={!url || busy}
+                          title={p.title || 'Pinterest pin'}
+                        >
+                          {url ? <img src={url} alt={p.title || 'Pin'} /> : <span className="hint small">No image</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="row-between">
+                  <h2 className="mb-0">Moodboard</h2>
+                  <span className="badge">{pinterestMoodboardItems.length}/6</span>
+                </div>
+
+                {pinterestMoodboardItems.length === 0 ? (
+                  <p className="hint small">Import a board or click pins to add them here.</p>
+                ) : (
+                  <div className="pin-grid compact">
+                    {selectedPinterestPins.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="pin-tile selected"
+                        onClick={() => setSelectedPinterestPins((prev) => prev.filter((x) => x.id !== p.id))}
+                        disabled={busy}
+                        title="Remove"
+                      >
+                        <img src={p.imageUrl} alt={p.title || 'Selected'} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="row-actions compact mt-2">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={generateFromPinterestMoodboard}
+                    disabled={busy || pinterestMoodboardItems.length === 0}
+                  >
+                    Generate from moodboard
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => setSelectedPinterestPins([])}
+                    disabled={busy || pinterestMoodboardItems.length === 0}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </section>
+            </div>
+          )
+        ) : !googleConnected ? (
           <EmptyState
             title="Connect Google Photos"
             description="Click below to connect your Google account. Roomify will request the Photos Picker scope so you can choose photos in Google's own dialog."
             action={
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={busy}
-                onClick={handleConnectGoogle}
-              >
+              <button type="button" className="btn-primary" disabled={busy} onClick={handleConnectGoogle}>
                 {busy ? 'Connecting…' : 'Connect Google Photos'}
               </button>
             }
@@ -427,9 +786,9 @@ export default function InspirationPage() {
               ) : !pickerSession ? (
                 <>
                   <p className="hint small mt-2">
-                    Roomify will open Google's hosted picker in a new tab. After you choose your
-                    photos and click "Done" there, come back to this page — we'll detect the
-                    selection automatically and generate a concept.
+                    Roomify will open Google's hosted picker in a new tab. After you choose your photos and click
+                    &quot;Done&quot; there, come back to this page — we&apos;ll detect the selection automatically and
+                    generate a concept.
                   </p>
                   <div className="row-actions compact mt-2">
                     <button
@@ -444,16 +803,9 @@ export default function InspirationPage() {
                 </>
               ) : pickerReady ? (
                 <>
-                  <p className="hint small mt-2">
-                    Selection received. Ready to generate a concept from your picked photos.
-                  </p>
+                  <p className="hint small mt-2">Selection received. Ready to generate a concept from your picked photos.</p>
                   <div className="row-actions compact mt-2">
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      onClick={generateFromPicker}
-                      disabled={busy}
-                    >
+                    <button type="button" className="btn-primary" onClick={generateFromPicker} disabled={busy}>
                       {busy ? 'Generating…' : 'Generate from picked photos'}
                     </button>
                     <button type="button" className="btn-outline" onClick={cancelPicker} disabled={busy}>
@@ -464,8 +816,7 @@ export default function InspirationPage() {
               ) : (
                 <>
                   <p className="hint small mt-2">
-                    Waiting for you to finish picking in the Google tab. If the tab didn't open,
-                    use the link below.
+                    Waiting for you to finish picking in the Google tab. If the tab didn&apos;t open, use the link below.
                   </p>
                   <div className="row-actions compact mt-2">
                     <a
@@ -493,8 +844,8 @@ export default function InspirationPage() {
                 </div>
                 {albums.length === 0 ? (
                   <p className="hint small">
-                    Library API access may be limited (Google deprecated it for new apps).
-                    Use the Picker above for the supported flow.
+                    Library API access may be limited (Google deprecated it for new apps). Use the Picker above for the
+                    supported flow.
                   </p>
                 ) : (
                   <ul className="project-list">
@@ -503,9 +854,7 @@ export default function InspirationPage() {
                         <div className="row-between">
                           <div>
                             <div className="strong">{a.title || 'Untitled album'}</div>
-                            <div className="hint small">
-                              {a.mediaItemsCount ? `${a.mediaItemsCount} items` : ''}
-                            </div>
+                            <div className="hint small">{a.mediaItemsCount ? `${a.mediaItemsCount} items` : ''}</div>
                           </div>
                           <button
                             type="button"
@@ -547,11 +896,7 @@ export default function InspirationPage() {
                           disabled={!url || busy}
                           title={m.filename || 'Google Photos item'}
                         >
-                          {url ? (
-                            <img src={url} alt={m.filename || 'Photo'} />
-                          ) : (
-                            <span className="hint small">No image</span>
-                          )}
+                          {url ? <img src={url} alt={m.filename || 'Photo'} /> : <span className="hint small">No image</span>}
                         </button>
                       );
                     })}

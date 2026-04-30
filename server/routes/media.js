@@ -88,6 +88,22 @@ function tryJsonParse(value) {
 }
 
 const FETCH_TIMEOUT_MS = 15_000;
+// Moodboard hero renders can be slow; allow longer than typical API calls.
+const PROCESS_URLS_VERTEX_PREVIEW_TIMEOUT_MS = 180_000;
+
+async function withTimeout(promise, ms) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * Fetch a remote URL and stream the body, bailing out if it exceeds maxBytes
@@ -523,14 +539,23 @@ router.post(
     const kw = concept.searchKeywords?.[0] || concept.styleLabel || 'interior design';
     const similar = await safeSimilarImages(kw);
     let featuredImage = similar[0]?.link || DEFAULT_FEATURED;
-    const vertexImageUri = await safeVertexFlashImagePreview({
-      concept,
-      chatContext,
-      referenceImages,
-      audioAnalyses: [],
-      regenSeed,
-    });
-    if (vertexImageUri) featuredImage = vertexImageUri;
+    // Moodboards benefit a lot from a moodboard-conditioned hero image, but
+    // we must cap latency to avoid proxy/browser timeouts.
+    try {
+      const vertexImageUri = await withTimeout(
+        safeVertexFlashImagePreview({
+          concept,
+          chatContext,
+          referenceImages,
+          audioAnalyses: [],
+          regenSeed,
+        }),
+        PROCESS_URLS_VERTEX_PREVIEW_TIMEOUT_MS
+      );
+      if (vertexImageUri) featuredImage = vertexImageUri;
+    } catch (err) {
+      console.warn('[media:process-urls] vertex preview skipped:', err?.message || err);
+    }
 
     res.json({
       concept: { ...concept, featuredImage },

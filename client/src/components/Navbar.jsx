@@ -34,6 +34,9 @@ export default function Navbar() {
           <Link to="/privacy" className="nav-privacy">
             Privacy
           </Link>
+          <Link to="/terms" className="nav-privacy">
+            Terms
+          </Link>
           {user ? (
             <button type="button" className="btn-ghost" onClick={() => logout()}>
               Sign out

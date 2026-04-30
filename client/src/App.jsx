@@ -8,6 +8,7 @@ import ExplorePage from './pages/ExplorePage.jsx';
 import InspirationPage from './pages/InspirationPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage.jsx';
+import TermsPage from './pages/TermsPage.jsx';
 import AnalyticsRouteListener from './components/AnalyticsRouteListener.jsx';
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
         <Route path="/signin" element={<SignInPage />} />
         <Route
           path="/dashboard"

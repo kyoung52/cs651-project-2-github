@@ -29,6 +29,47 @@ import { isPinterestConfigured, isGooglePhotosPickerConfigured } from '../config
 
 const router = express.Router();
 
+function choosePinterestImageUrl(pin) {
+  const images = pin?.media?.images;
+  if (!images || typeof images !== 'object') return '';
+
+  const preferred = ['1200x', '600x', '400x300', '150x150'];
+  for (const k of preferred) {
+    const url = images?.[k]?.url;
+    if (typeof url === 'string' && url.startsWith('https://')) return url;
+  }
+
+  // Fallback: any https URL in the images map
+  for (const v of Object.values(images)) {
+    const url = v?.url;
+    if (typeof url === 'string' && url.startsWith('https://')) return url;
+  }
+  return '';
+}
+
+function extractPinterestImageUrls(pin) {
+  const images = pin?.media?.images;
+  if (!images || typeof images !== 'object') return [];
+  const urls = Object.values(images)
+    .map((v) => v?.url)
+    .filter((u) => typeof u === 'string' && u.startsWith('https://'));
+  return Array.from(new Set(urls));
+}
+
+function mapPinterestPin(pin, boardId) {
+  const imageUrl = choosePinterestImageUrl(pin);
+  const imageUrls = extractPinterestImageUrls(pin);
+  return {
+    id: pin?.id ? String(pin.id) : '',
+    boardId: boardId ? String(boardId) : String(pin?.board_id || ''),
+    title: typeof pin?.title === 'string' ? pin.title : '',
+    description: typeof pin?.description === 'string' ? pin.description : '',
+    link: typeof pin?.link === 'string' ? pin.link : '',
+    imageUrl,
+    imageUrls,
+  };
+}
+
 /**
  * Resolve a Google OAuth access token from (in order): query param,
  * user's stored token, dev env fallback.
@@ -297,7 +338,10 @@ router.get(
     }
     try {
       const pins = await pinterest.listPins(token, req.params.boardId);
-      res.json({ configured: true, connected, dev, pins });
+      const mapped = Array.isArray(pins)
+        ? pins.map((p) => mapPinterestPin(p, req.params.boardId)).filter((p) => p.id && p.imageUrl)
+        : [];
+      res.json({ configured: true, connected, dev, pins: mapped });
     } catch (err) {
       console.warn('[pinterest:pins]', err.message);
       return sendError(res, 502, 'PINTEREST_FAILED', 'Unable to fetch Pinterest pins.');
